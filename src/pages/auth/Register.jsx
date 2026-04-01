@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 export default function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ nombre: '', apellido: '', email: '', password: '', confirm: '' })
+  const [form, setForm] = useState({ nombre: '', apellido: '', email: '', password: '', confirm: '', rol: 'secretaria' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,7 +18,7 @@ export default function Register() {
     if (form.password.length < 6) return setError('La contraseña debe tener al menos 6 caracteres')
     setLoading(true)
     try {
-      await register(form.email, form.password, form.nombre, form.apellido)
+      await register(form.email, form.password, form.nombre, form.apellido, form.rol)
       navigate('/pendiente')
     } catch (err) {
       if (err.code === 'auth/email-already-in-use') setError('Ese email ya está registrado')
@@ -49,10 +49,20 @@ export default function Register() {
               <input value={form.apellido} onChange={e => set('apellido', e.target.value)} required />
             </div>
           </div>
+
           <div className="form-field" style={{marginBottom:'12px'}}>
             <label>Correo electrónico</label>
             <input type="email" value={form.email} onChange={e => set('email', e.target.value)} required />
           </div>
+
+          <div className="form-field" style={{marginBottom:'12px'}}>
+            <label>Soy...</label>
+            <select value={form.rol} onChange={e => set('rol', e.target.value)}>
+              <option value="secretaria">Secretaria</option>
+              <option value="kinesiologo">Kinesiológo</option>
+            </select>
+          </div>
+
           <div className="form-grid" style={{marginBottom:'18px'}}>
             <div className="form-field">
               <label>Contraseña</label>
@@ -63,6 +73,7 @@ export default function Register() {
               <input type="password" value={form.confirm} onChange={e => set('confirm', e.target.value)} required />
             </div>
           </div>
+
           <button className="btn btn-primary" style={{width:'100%', justifyContent:'center', padding:'10px'}} disabled={loading}>
             {loading ? 'Registrando...' : 'Crear cuenta'}
           </button>
