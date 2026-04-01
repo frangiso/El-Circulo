@@ -16,11 +16,11 @@ import Reportes from './pages/reportes/Reportes'
 import Usuarios from './pages/usuarios/Usuarios'
 import Logs from './pages/logs/Logs'
 
-function PrivateRoute({ children, roles }) {
+function PrivateRoute({ children, solodueno }) {
   const { currentUser, userProfile } = useAuth()
   if (!currentUser) return <Navigate to="/login" replace />
   if (userProfile?.estado === 'pendiente') return <Navigate to="/pendiente" replace />
-  if (roles && !roles.includes(userProfile?.rol)) return <Navigate to="/" replace />
+  if (solodueno && userProfile?.rol !== 'dueno') return <Navigate to="/" replace />
   return children
 }
 
@@ -45,9 +45,9 @@ function AppRoutes() {
         <Route path="pacientes/:id" element={<FichaPaciente />} />
         <Route path="pacientes/:id/editar" element={<EditarPaciente />} />
         <Route path="caja" element={<Caja />} />
-        <Route path="reportes" element={<PrivateRoute roles={['dueno', 'kinesiologo']}><Reportes /></PrivateRoute>} />
-        <Route path="usuarios" element={<PrivateRoute roles={['dueno']}><Usuarios /></PrivateRoute>} />
-        <Route path="logs" element={<PrivateRoute roles={['dueno', 'kinesiologo']}><Logs /></PrivateRoute>} />
+        <Route path="reportes" element={<Reportes />} />
+        <Route path="logs" element={<Logs />} />
+        <Route path="usuarios" element={<PrivateRoute solodueno><Usuarios /></PrivateRoute>} />
       </Route>
     </Routes>
   )
