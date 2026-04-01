@@ -18,13 +18,13 @@ export function AuthProvider({ children }) {
     return signInWithEmailAndPassword(auth, email, password)
   }
 
-  async function register(email, password, nombre, apellido) {
+  async function register(email, password, nombre, apellido, rol = 'secretaria') {
     const cred = await createUserWithEmailAndPassword(auth, email, password)
     await setDoc(doc(db, 'usuarios', cred.user.uid), {
       nombre,
       apellido,
       email,
-      rol: 'pendiente',
+      rol,
       estado: 'pendiente',
       creadoEn: serverTimestamp()
     })
