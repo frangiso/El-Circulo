@@ -1,122 +1,53 @@
-# El Círculo — Sistema de Gestión Kinesiológica
+# El Círculo v3 — Instrucciones
 
-## Instalación paso a paso
+## 1. Subir a GitHub
+Subí todos los archivos manteniendo la estructura de carpetas.
 
-### 1. Subir archivos a GitHub
+## 2. Firebase ya configurado
+`src/firebase.js` ya tiene los datos de tu proyecto. No lo toques.
 
-Subí todos los archivos y carpetas manteniendo la estructura exacta.
+## 3. Reglas de Firestore
+Firebase Console → Firestore → Reglas → pegá el contenido de `firestore.rules` → Publicar.
 
-### 2. Configurar Firebase
+## 4. Índices de Firestore
+La primera vez que uses el sistema aparecerán links en la consola del navegador para crear índices automáticamente. Hacé clic y Firebase los crea en ~1 minuto.
 
-1. Entrá a https://console.firebase.google.com
-2. Creá un nuevo proyecto llamado "elcirculo"
-3. Activá **Authentication** → Correo electrónico/Contraseña
-4. Activá **Firestore Database** → Modo producción
-5. En Configuración del proyecto → Agregar app web → copiá los datos
+Índices requeridos:
+- pacientes: archivado (Asc) + apellido (Asc)
+- turnos: fecha (Asc) + hora (Asc)
+- logs: ts (Desc)
 
-### 3. Pegar la config de Firebase
+## 5. Logo
+Copiá `logo.png` a la carpeta `public/`.
 
-Abrí el archivo `src/firebase.js` y reemplazá los valores:
+## 6. Vercel
+Conectá el repo en vercel.com → Framework: Vite → Deploy.
 
-```js
-const firebaseConfig = {
-  apiKey: "TU_API_KEY_REAL",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
-}
-```
-
-### 4. Reglas de Firestore
-
-En Firebase Console → Firestore → Reglas, pegá esto:
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    function isAuth() { return request.auth != null; }
-    function getUser() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
-    function isActive() { return isAuth() && getUser().estado == 'activo'; }
-    function isDueno() { return isActive() && getUser().rol == 'dueno'; }
-    function isKine() { return isActive() && (getUser().rol == 'kinesiologo' || getUser().rol == 'dueno'); }
-
-    match /usuarios/{uid} {
-      allow read: if isActive();
-      allow create: if request.auth != null;
-      allow update: if isDueno() || request.auth.uid == uid;
-    }
-    match /pacientes/{id} {
-      allow read, write: if isActive();
-    }
-    match /turnos/{id} {
-      allow read, write: if isActive();
-    }
-    match /caja/{id} {
-      allow read, write: if isActive();
-    }
-    match /logs/{id} {
-      allow read: if isKine();
-      allow create: if isActive();
-    }
-    match /obrasSociales/{id} {
-      allow read, write: if isActive();
-    }
-  }
-}
-```
-
-### 5. Agregar el logo
-
-Copiá el logo del centro (imagen PNG) a la carpeta `public/` con el nombre `logo.png`.
-
-### 6. Crear el primer usuario dueño
-
-1. Desplegá en Vercel y abrí el sistema
-2. Registrate con tu email
-3. En Firebase Console → Firestore → colección `usuarios` → tu documento → cambiá `rol` a `dueno` y `estado` a `activo`
-4. A partir de ahí podés aprobar a los demás usuarios desde el panel
-
-### 7. Desplegar en Vercel
-
-1. Conectá el repo de GitHub en vercel.com
-2. Framework: Vite
-3. Deploy
+## 7. Primer usuario dueño
+1. Registrate en el sistema
+2. Firebase Console → Firestore → usuarios → tu documento
+3. Cambiá `rol` a `dueno` y `estado` a `activo`
 
 ---
 
-## Índices de Firestore necesarios
+## Optimizaciones de lectura
 
-En Firebase Console → Firestore → Índices, creá estos índices compuestos:
+| Panel | Comportamiento | Lecturas |
+|-------|---------------|----------|
+| Dashboard | Carga automática | ~3 lecturas al abrir |
+| Turnos | **Vacío hasta buscar** | 0 hasta que eligen fecha |
+| Pacientes | **Vacío hasta buscar** | 0 hasta que escriben |
+| Pacientes archivados | Solo al hacer clic en la solapa | 1 lectura bajo demanda |
+| Caja | 1 doc por mes completo | 1 lectura por mes |
+| Reportes | Solo turnos del mes | 1 lectura por mes |
+| Logs | 100 docs, solo al abrir | 1 lectura bajo demanda |
+| Usuarios | Caché de sesión | 1 lectura por sesión |
 
-| Colección | Campo 1 | Campo 2 | Orden |
-|-----------|---------|---------|-------|
-| turnos | fecha (Asc) | hora (Asc) | — |
-| caja | mes (Asc) | timestamp (Asc) | — |
-| logs | timestamp (Desc) | — | — |
+**Estimación:** ~2.000-5.000 lecturas/día con uso normal. Muy por debajo del límite de 50.000 del plan Spark gratuito.
 
-Firebase también te va a mostrar links directos para crear los índices cuando aparezcan errores en consola la primera vez que uses la app.
+## Limpieza automática (silenciosa)
+Al iniciar sesión cada usuario:
+1. Archiva en batch los pacientes con plan vencido
+2. Borra automáticamente los archivados hace +12 meses
 
----
-
-## Roles del sistema
-
-| Rol | Acceso |
-|-----|--------|
-| **Secretaria** | Turnos, Pacientes, Caja |
-| **Kinesiológo** | Turnos, Pacientes, Caja, Reportes, Logs |
-| **Dueño** | Todo + Usuarios |
-
----
-
-## Estructura de colecciones Firestore
-
-- `usuarios` — datos de cada usuario con rol y estado
-- `pacientes` — ficha completa con plan de sesiones
-- `turnos` — cada turno con fecha, hora, kinesiológo y paciente
-- `caja` — movimientos de caja por mes
-- `logs` — registro de actividad automático
-- `obrasSociales` — obras sociales personalizadas
-
+Los profesionales no lo notan. Todo corre en background.

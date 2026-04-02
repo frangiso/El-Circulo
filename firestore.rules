@@ -1,65 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAuth() { return request.auth != null; }
+    function getUser() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
+    function isActive() { return isAuth() && getUser().estado == 'activo'; }
+    function isDueno() { return isActive() && getUser().rol == 'dueno'; }
 
-    function isLoggedIn() {
-      return request.auth != null;
+    match /usuarios/{uid} {
+      allow read: if isActive();
+      allow create: if isAuth();
+      allow update: if isDueno() || request.auth.uid == uid;
     }
-
-    function userRole() {
-      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol;
-    }
-
-    function isActive() {
-      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.estado == 'activo';
-    }
-
-    function isDueno() {
-      return isLoggedIn() && isActive() && userRole() == 'dueno';
-    }
-
-    function isKine() {
-      return isLoggedIn() && isActive() && (userRole() == 'kinesiologo' || userRole() == 'dueno');
-    }
-
-    function isStaff() {
-      return isLoggedIn() && isActive() &&
-        (userRole() == 'dueno' || userRole() == 'kinesiologo' || userRole() == 'secretaria');
-    }
-
-    // Usuarios: cualquiera puede crear su propio doc al registrarse
-    match /usuarios/{userId} {
-      allow read: if isLoggedIn();
-      allow create: if request.auth.uid == userId;
-      allow update: if isDueno() || request.auth.uid == userId;
-      allow delete: if isDueno();
-    }
-
-    // Pacientes
-    match /pacientes/{id} {
-      allow read, write: if isStaff();
-    }
-
-    // Turnos
-    match /turnos/{id} {
-      allow read, write: if isStaff();
-    }
-
-    // Caja
-    match /caja/{id} {
-      allow read, write: if isStaff();
-    }
-
-    // Obras sociales (catálogo)
-    match /obrasSociales/{id} {
-      allow read: if isLoggedIn();
-      allow write: if isStaff();
-    }
-
-    // Logs: cualquier staff puede escribir, solo kine/dueño puede leer
-    match /logs/{id} {
-      allow create: if isStaff();
-      allow read: if isKine();
-    }
+    match /pacientes/{id} { allow read, write: if isActive(); }
+    match /turnos/{id}    { allow read, write: if isActive(); }
+    match /caja/{id}      { allow read, write: if isActive(); }
+    match /logs/{id}      { allow read, create: if isActive(); }
+    match /obrasSociales/{id} { allow read, write: if isActive(); }
   }
 }
