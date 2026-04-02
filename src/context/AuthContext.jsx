@@ -1,58 +1,41 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from 'firebase/auth'
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut,
+  createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '../firebase'
 
-const AuthContext = createContext()
-
-export function useAuth() {
-  return useContext(AuthContext)
-}
+const Ctx = createContext()
+export const useAuth = () => useContext(Ctx)
 
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(null)
-  const [userProfile, setUserProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser]     = useState(null)
+  const [perfil, setPerfil] = useState(null)
+  const [listo, setListo]   = useState(false)
 
-  async function login(email, password) {
-    return signInWithEmailAndPassword(auth, email, password)
-  }
+  const login   = (e,p) => signInWithEmailAndPassword(auth, e, p)
+  const logout  = async () => { await signOut(auth); setPerfil(null) }
+  const resetPw = (e) => sendPasswordResetEmail(auth, e)
 
-  async function register(email, password, nombre, apellido, rol = 'secretaria') {
-    const cred = await createUserWithEmailAndPassword(auth, email, password)
-    await setDoc(doc(db, 'usuarios', cred.user.uid), {
-      nombre,
-      apellido,
-      email,
-      rol,
-      estado: 'pendiente',
-      creadoEn: serverTimestamp()
+  async function registrar(email, pass, nombre, apellido, rol) {
+    const c = await createUserWithEmailAndPassword(auth, email, pass)
+    await setDoc(doc(db,'usuarios',c.user.uid), {
+      nombre, apellido, email, rol, estado:'pendiente', creadoEn: serverTimestamp()
     })
-    return cred
+    return c
   }
 
-  async function logout() {
-    await signOut(auth)
-    setUserProfile(null)
-  }
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user)
-      if (user) {
-        const snap = await getDoc(doc(db, 'usuarios', user.uid))
-        if (snap.exists()) setUserProfile(snap.data())
-      }
-      setLoading(false)
-    })
-    return unsub
-  }, [])
-
-  const value = { currentUser, userProfile, login, register, logout, loading }
+  useEffect(() => onAuthStateChanged(auth, async u => {
+    setUser(u)
+    if (u) {
+      const s = await getDoc(doc(db,'usuarios',u.uid))
+      setPerfil(s.exists() ? s.data() : null)
+    } else { setPerfil(null) }
+    setListo(true)
+  }), [])
 
   return (
-    <AuthContext.Provider value={value}>
-      {!loading && children}
-    </AuthContext.Provider>
+    <Ctx.Provider value={{ user, perfil, listo, login, logout, registrar, resetPw }}>
+      {listo && children}
+    </Ctx.Provider>
   )
 }
