@@ -1,101 +1,98 @@
 import { useEffect, useState } from 'react'
-import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore'
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
 import { db } from '../../firebase'
+import { useCache } from '../../context/AppCache'
 
-const ACCIONES_COLORES = {
-  'Nuevo turno': 'badge-green',
-  'Nuevo paciente': 'badge-blue',
-  'Edición paciente': 'badge-amber',
-  'Entrada caja': 'badge-green',
-  'Salida caja': 'badge-red',
-  'Aprobación usuario': 'badge-blue',
-  'Rechazo usuario': 'badge-red',
-  'Edición usuario': 'badge-amber',
-}
+const ILupa = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 
 export default function Logs() {
-  const [logs, setLogs] = useState([])
-  const [usuarios, setUsuarios] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [filtroUsuario, setFiltroUsuario] = useState('')
-  const [filtroAccion, setFiltroAccion] = useState('')
-  const [filtroFecha, setFiltroFecha] = useState('')
+  const { getUsuarios } = useCache()
+  const [logs, setLogs]     = useState([])
+  const [users, setUsers]   = useState([])
+  const [carg, setCarg]     = useState(true)
+  const [busq, setBusq]     = useState('')
+  const [buscado, setBuscado] = useState(false)
+  const [filtroU, setFU]    = useState('')
+  const [filtroA, setFA]    = useState('')
+  const [filtroF, setFF]    = useState('')
 
   useEffect(() => {
-    async function cargar() {
-      const [logsSnap, usersSnap] = await Promise.all([
-        getDocs(query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(500))),
-        getDocs(collection(db, 'usuarios'))
-      ])
-      setLogs(logsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setUsuarios(usersSnap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setLoading(false)
-    }
-    cargar()
+    Promise.all([
+      getDocs(query(collection(db, 'logs'), orderBy('ts', 'desc'), limit(100))),
+      getUsuarios()
+    ]).then(([snap, u]) => {
+      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setUsers(u); setCarg(false)
+    })
   }, [])
 
-  const accionesUnicas = [...new Set(logs.map(l => l.accion))].sort()
+  const acciones = [...new Set(logs.map(l => l.accion))].sort()
 
-  const filtrados = logs.filter(l => {
-    const matchU = filtroUsuario ? l.userId === filtroUsuario : true
-    const matchA = filtroAccion ? l.accion === filtroAccion : true
-    const matchF = filtroFecha ? (l.timestamp?.toDate?.()?.toISOString().startsWith(filtroFecha)) : true
-    return matchU && matchA && matchF
+  // Filtrado en memoria — sin Firestore
+  const vis = logs.filter(l => {
+    const mU = filtroU ? l.uid === filtroU : true
+    const mA = filtroA ? l.accion === filtroA : true
+    const mF = filtroF ? l.ts?.toDate?.().toISOString().startsWith(filtroF) : true
+    const mB = busq ? `${l.nombre} ${l.detalle} ${l.accion}`.toLowerCase().includes(busq.toLowerCase()) : true
+    return mU && mA && mF && mB
   })
 
-  function formatFechaHora(ts) {
-    if (!ts?.toDate) return '—'
-    return ts.toDate().toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' })
+  function bLog(a) {
+    const v = ['Nuevo turno', 'Nuevo paciente', 'Aprobó usuario', 'Reactivó paciente', 'Reactivó usuario']
+    const r = ['Rechazó usuario', 'Desactivó usuario', 'Borrado automático']
+    const am = ['Edición paciente', 'Cambió rol', 'Movimiento caja']
+    if (v.includes(a)) return <span className="badge bg">{a}</span>
+    if (r.includes(a)) return <span className="badge br">{a}</span>
+    if (am.includes(a)) return <span className="badge ba">{a}</span>
+    return <span className="badge bk">{a}</span>
   }
+
+  const hayFiltro = busq || filtroU || filtroA || filtroF
 
   return (
     <div>
-      <h1 style={{fontSize:'20px', fontWeight:'600', marginBottom:'20px'}}>Registro de actividad</h1>
+      <div className="ph"><div className="ptitle">Registro de actividad</div></div>
 
       <div className="filtros">
-        <input type="date" value={filtroFecha} onChange={e => setFiltroFecha(e.target.value)} />
-        <select value={filtroUsuario} onChange={e => setFiltroUsuario(e.target.value)}>
+        <div className="sw" style={{ flex: 1, minWidth: 200 }}>
+          <ILupa />
+          <input className="si" placeholder="Buscar en actividad..." value={busq}
+            onChange={e => { setBusq(e.target.value); setBuscado(!!e.target.value) }} />
+        </div>
+        <input type="date" value={filtroF} onChange={e => setFF(e.target.value)} />
+        <select value={filtroU} onChange={e => setFU(e.target.value)}>
           <option value="">Todos los usuarios</option>
-          {usuarios.map(u => <option key={u.id} value={u.id}>{u.apellido} {u.nombre}</option>)}
+          {users.map(u => <option key={u.id} value={u.id}>{u.apellido} {u.nombre}</option>)}
         </select>
-        <select value={filtroAccion} onChange={e => setFiltroAccion(e.target.value)}>
+        <select value={filtroA} onChange={e => setFA(e.target.value)}>
           <option value="">Todas las acciones</option>
-          {accionesUnicas.map(a => <option key={a} value={a}>{a}</option>)}
+          {acciones.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
-        {(filtroUsuario || filtroAccion || filtroFecha) && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { setFiltroUsuario(''); setFiltroAccion(''); setFiltroFecha('') }}>
-            Limpiar filtros
-          </button>
-        )}
+        {hayFiltro && <button className="btn bs bsm" onClick={() => { setBusq(''); setFU(''); setFA(''); setFF(''); setBuscado(false) }}>Limpiar</button>}
       </div>
 
-      <div style={{fontSize:'12px', color:'#888', marginBottom:'10px'}}>{filtrados.length} registro{filtrados.length !== 1 ? 's' : ''}</div>
-
-      <div className="card" style={{padding:0, overflow:'hidden'}}>
-        {loading ? (
-          <div className="loading-center"><div className="spinner" /></div>
-        ) : filtrados.length === 0 ? (
-          <div style={{padding:'40px', textAlign:'center', color:'#888', fontSize:'13px'}}>Sin registros para los filtros seleccionados</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr>
-              </thead>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        {carg
+          ? <div className="sc"><div className="sp" /></div>
+          : vis.length === 0
+          ? <div className="empty-search"><ILupa /><p>No se encontraron registros</p><span>Cambiá los filtros para ver resultados</span></div>
+          : <div className="tw"><table>
+              <thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
               <tbody>
-                {filtrados.map(l => (
+                {vis.map(l => (
                   <tr key={l.id}>
-                    <td style={{color:'#888', whiteSpace:'nowrap', fontSize:'12px'}}>{formatFechaHora(l.timestamp)}</td>
-                    <td style={{fontWeight:'500'}}>{l.userName}</td>
-                    <td><span className={`badge ${ACCIONES_COLORES[l.accion] || 'badge-gray'}`}>{l.accion}</span></td>
-                    <td style={{fontSize:'12px', color:'#555'}}>{l.detalle}</td>
+                    <td className="cgr" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                      {l.ts?.toDate?.().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) || '—'}
+                    </td>
+                    <td className="fw6">{l.nombre}</td>
+                    <td>{bLog(l.accion)}</td>
+                    <td className="cgr" style={{ fontSize: 13 }}>{l.detalle}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
-        )}
+            </table>}
       </div>
+      <div style={{ fontSize: 12, color: '#aaa', marginTop: 8, textAlign: 'right' }}>Últimos 100 registros</div>
     </div>
   )
 }
