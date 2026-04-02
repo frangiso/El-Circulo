@@ -1,264 +1,210 @@
+// ── CAJA ─────────────────────────────────────────────────────
 import { useEffect, useState } from 'react'
-import { collection, getDocs, addDoc, query, where, orderBy, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
-import { registrarLog } from '../../utils/helpers'
+import { useCache } from '../../context/AppCache'
+import { mesActual, labelMes, getMeses, fmtMonto, escribirLog } from '../../utils/helpers'
 
-const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+const ILupa = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 
-function getMesActual() {
-  const h = new Date()
-  return `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}`
-}
-
-function getMeses() {
-  const meses = []
-  const h = new Date()
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(h.getFullYear(), h.getMonth() - i, 1)
-    meses.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
-  }
-  return meses
-}
-
-function labelMes(str) {
-  if (!str) return ''
-  const [y, m] = str.split('-')
-  return `${MESES[parseInt(m)-1]} ${y}`
-}
-
-const fmt = n => `$${Number(n).toLocaleString('es-AR', {minimumFractionDigits:0})}`
-
-export default function Caja() {
-  const { currentUser, userProfile } = useAuth()
-  const [mes, setMes] = useState(getMesActual())
-  const [movimientos, setMovimientos] = useState([])
-  const [kines, setKines] = useState([])
-  const [kineFiltro, setKineFiltro] = useState('')
-  const [tab, setTab] = useState('movimientos')
-  const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState(false)
-  const [form, setForm] = useState({ tipo:'entrada', importe:'', detalle:'', profesionalId:'', esTransferencia:false, destinatario:'' })
+export function Caja() {
+  const { user, perfil } = useAuth()
+  const { getKines } = useCache()
+  const [mes, setMes]       = useState(mesActual())
+  const [docC, setDocC]     = useState(null)
+  const [kines, setKines]   = useState([])
+  const [tab, setTab]       = useState('movimientos')
+  const [carg, setCarg]     = useState(true)
+  const [modal, setModal]   = useState(false)
+  const [fMov, setFM]       = useState({ tipo:'entrada', desc:'', importe:'', kineId:'' })
   const [saving, setSaving] = useState(false)
+  const [busq, setBusq]     = useState('')
+  const [buscado, setBuscado] = useState(false)
 
+  useEffect(() => { getKines().then(setKines) }, [])
+
+  // 1 lectura por mes — doc "caja_YYYY-MM"
   useEffect(() => {
-    getDocs(query(collection(db, 'usuarios'), where('estado','==','activo')))
-      .then(snap => setKines(snap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>['kinesiologo','dueno'].includes(u.rol))))
-  }, [])
+    setCarg(true); setBusq(''); setBuscado(false)
+    getDoc(doc(db, 'caja', `caja_${mes}`)).then(s => {
+      setDocC(s.exists() ? { id: s.id, ...s.data() } : null)
+      setCarg(false)
+    })
+  }, [mes])
 
-  useEffect(() => { cargar() }, [mes])
+  const movs    = docC?.movimientos || []
+  const saldoI  = docC?.saldoInicial || 0
+  const entradas = movs.filter(m => m.tipo === 'entrada').reduce((a, m) => a + m.importe, 0)
+  const salidas  = movs.filter(m => m.tipo !== 'entrada').reduce((a, m) => a + m.importe, 0)
+  const saldoF   = saldoI + entradas - salidas
 
-  async function cargar() {
-    setLoading(true)
-    const snap = await getDocs(query(collection(db,'caja'), where('mes','==',mes), orderBy('timestamp','asc')))
-    setMovimientos(snap.docs.map(d=>({id:d.id,...d.data()})))
-    setLoading(false)
+  // Filtrado en memoria con lupa
+  const movsVis = !buscado ? movs : movs.filter(m =>
+    `${m.descripcion} ${m.profesionalNombre||''}`.toLowerCase().includes(busq.toLowerCase())
+  )
+
+  function saldoFila(idx) {
+    let s = saldoI
+    for (let i = 0; i <= idx; i++) s += movs[i].tipo === 'entrada' ? movs[i].importe : -movs[i].importe
+    return s
   }
 
-  function setF(k,v) { setForm(f=>({...f,[k]:v})) }
+  const resumenK = kines.map(k => {
+    const ms = movs.filter(m => m.kineId === k.id && m.tipo === 'entrada')
+    return { ...k, ses: ms.length, total: ms.reduce((a, m) => a + m.importe, 0) }
+  }).filter(k => k.ses > 0)
 
-  async function guardar(e) {
-    e.preventDefault()
-    if (!form.importe || !form.detalle) return alert('Completá importe y detalle')
-    setSaving(true)
+  const transf = movs.filter(m => m.tipo === 'transferencia')
+
+  const setF = (k, v) => setFM(p => ({ ...p, [k]: v }))
+
+  async function guardarMov(e) {
+    e.preventDefault(); setSaving(true)
     try {
-      const kine = kines.find(k=>k.id===form.profesionalId)
-      await addDoc(collection(db,'caja'), {
-        mes, tipo:form.tipo, importe:parseFloat(form.importe),
-        detalle:form.detalle.trim(),
-        profesionalId:form.profesionalId||null,
-        profesionalNombre:kine?`${kine.apellido} ${kine.nombre}`:null,
-        esTransferencia:form.esTransferencia,
-        destinatario:form.esTransferencia?form.destinatario:null,
-        cargadoPor:currentUser.uid,
-        cargadoPorNombre:`${userProfile.apellido} ${userProfile.nombre}`,
-        timestamp:serverTimestamp()
-      })
-      await registrarLog(currentUser.uid, `${userProfile.apellido} ${userProfile.nombre}`,
-        form.tipo==='entrada'?'Entrada caja':'Salida caja',
-        `${fmt(parseFloat(form.importe))} — ${form.detalle}`)
-      setModal(false)
-      setForm({tipo:'entrada',importe:'',detalle:'',profesionalId:'',esTransferencia:false,destinatario:''})
-      cargar()
-    } catch(err){ console.error(err); alert('Error al guardar') }
+      const kine = kines.find(k => k.id === fMov.kineId)
+      const mov = {
+        tipo: fMov.tipo, descripcion: fMov.desc,
+        importe: parseFloat(fMov.importe),
+        kineId: fMov.kineId || null,
+        profesionalNombre: kine ? `${kine.apellido} ${kine.nombre}` : null,
+        cargadoPor: user.uid,
+        cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
+        fecha: new Date().toISOString().split('T')[0],
+        hora: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+      }
+      const ref = doc(db, 'caja', `caja_${mes}`)
+      if (!docC) {
+        const esIni = fMov.tipo === 'saldoInicial'
+        const data = { mes, saldoInicial: esIni ? parseFloat(fMov.importe) : 0, movimientos: esIni ? [] : [mov], creadoEn: serverTimestamp() }
+        await setDoc(ref, data)
+        setDocC(data)
+      } else if (fMov.tipo === 'saldoInicial') {
+        await updateDoc(ref, { saldoInicial: parseFloat(fMov.importe) })
+        setDocC(p => ({ ...p, saldoInicial: parseFloat(fMov.importe) }))
+      } else {
+        await updateDoc(ref, { movimientos: arrayUnion(mov) })
+        setDocC(p => ({ ...p, movimientos: [...(p.movimientos || []), mov] }))
+      }
+      await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Movimiento caja', `${fMov.tipo} $${fMov.importe} — ${fMov.desc}`)
+      setFM({ tipo: 'entrada', desc: '', importe: '', kineId: '' }); setModal(false)
+    } catch (err) { console.error(err); alert('Error al guardar') }
     setSaving(false)
   }
 
-  const filtrados = kineFiltro ? movimientos.filter(m=>m.profesionalId===kineFiltro) : movimientos
-  const transferencias = movimientos.filter(m=>m.esTransferencia)
-  const totalEntradas = movimientos.filter(m=>m.tipo==='entrada').reduce((s,m)=>s+m.importe,0)
-  const totalSalidas = movimientos.filter(m=>m.tipo==='salida').reduce((s,m)=>s+m.importe,0)
-  const saldoFinal = totalEntradas - totalSalidas
-  const resumenKines = kines.map(k=>{
-    const ms = movimientos.filter(m=>m.profesionalId===k.id&&m.tipo==='entrada')
-    return {...k, sesiones:ms.length, total:ms.reduce((s,m)=>s+m.importe,0)}
-  }).filter(k=>k.total>0)
-
-  let saldoAcum = 0
-  const movConSaldo = filtrados.map(m=>{
-    if(m.tipo==='entrada') saldoAcum+=m.importe; else saldoAcum-=m.importe
-    return {...m, saldoAcum}
-  })
-
   return (
     <div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:'600'}}>Control de caja</h1>
-        <button className="btn btn-primary" onClick={()=>setModal(true)}>+ Movimiento</button>
+      <div className="ph">
+        <div className="ptitle">Control de caja</div>
+        <button className="btn bp" onClick={() => setModal(true)}>+ Movimiento</button>
       </div>
 
-      <div className="metric-grid metric-grid-4">
-        <div className="metric-card"><div className="metric-label">Total entradas</div><div className="metric-value" style={{color:'#3B6D11'}}>{fmt(totalEntradas)}</div></div>
-        <div className="metric-card"><div className="metric-label">Total salidas</div><div className="metric-value" style={{color:'#A32D2D'}}>-{fmt(totalSalidas)}</div></div>
-        <div className="metric-card"><div className="metric-label">Debe haber en caja</div><div className="metric-value" style={{color:'#185FA5'}}>{fmt(saldoFinal)}</div></div>
-        <div className="metric-card"><div className="metric-label">Transferencias</div><div className="metric-value">{fmt(transferencias.reduce((s,m)=>s+m.importe,0))}</div></div>
+      <div className="mets m4">
+        <div className="met"><div className="met-l">Saldo inicial</div><div className="met-v">{fmtMonto(saldoI)}</div></div>
+        <div className="met"><div className="met-l">Total entradas</div><div className="met-v cve">+{fmtMonto(entradas)}</div></div>
+        <div className="met"><div className="met-l">Total salidas</div><div className="met-v cro">-{fmtMonto(salidas)}</div></div>
+        <div className="met"><div className="met-l">Debe haber en caja</div><div className="met-v caz">{fmtMonto(saldoF)}</div></div>
       </div>
 
       <div className="filtros">
-        <select value={mes} onChange={e=>setMes(e.target.value)}>
-          {getMeses().map(m=><option key={m} value={m}>{labelMes(m)}</option>)}
-        </select>
-        <select value={kineFiltro} onChange={e=>setKineFiltro(e.target.value)}>
-          <option value="">Todos los profesionales</option>
-          {kines.map(k=><option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+        <select value={mes} onChange={e => setMes(e.target.value)}>
+          {getMeses(12).map(m => <option key={m} value={m}>{labelMes(m)}</option>)}
         </select>
       </div>
 
       <div className="tabs">
-        {[['movimientos','Movimientos'],['transferencias','Transferencias'],['resumen','Resumen por profesional']].map(([k,l])=>(
-          <button key={k} className={'tab-btn'+(tab===k?' active':'')} onClick={()=>setTab(k)}>{l}</button>
-        ))}
+        <button className={`tab ${tab === 'movimientos' ? 'on' : ''}`} onClick={() => setTab('movimientos')}>Movimientos</button>
+        <button className={`tab ${tab === 'transferencias' ? 'on' : ''}`} onClick={() => setTab('transferencias')}>Transferencias</button>
+        <button className={`tab ${tab === 'resumen' ? 'on' : ''}`} onClick={() => setTab('resumen')}>Por profesional</button>
       </div>
 
-      {loading ? <div className="loading-center"><div className="spinner"/></div> : <>
-        {tab==='movimientos' && (
-          <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Fecha</th><th>Profesional</th><th>Detalle</th><th>Entradas</th><th>Salidas</th><th>Saldo</th><th>Cargado por</th></tr></thead>
-                <tbody>
-                  {movConSaldo.length===0
-                    ? <tr><td colSpan="7" style={{textAlign:'center',padding:'30px',color:'#888'}}>Sin movimientos este mes</td></tr>
-                    : movConSaldo.map(m=>(
-                      <tr key={m.id}>
-                        <td style={{color:'#888',whiteSpace:'nowrap'}}>{m.timestamp?.toDate?.()?.toLocaleDateString('es-AR')||'—'}</td>
-                        <td>{m.profesionalNombre||'—'}</td>
-                        <td>{m.detalle}</td>
-                        <td style={{color:'#3B6D11',fontWeight:'500'}}>{m.tipo==='entrada'?fmt(m.importe):'—'}</td>
-                        <td style={{color:'#A32D2D',fontWeight:'500'}}>{m.tipo==='salida'?`-${fmt(m.importe)}`:'—'}</td>
-                        <td style={{fontWeight:'500'}}>{fmt(m.saldoAcum)}</td>
-                        <td style={{color:'#888'}}>{m.cargadoPorNombre}</td>
-                      </tr>
-                    ))
-                  }
-                  {movConSaldo.length>0 && <tr className="total-row">
-                    <td colSpan="3">Total {labelMes(mes)}</td>
-                    <td style={{color:'#3B6D11'}}>{fmt(totalEntradas)}</td>
-                    <td style={{color:'#A32D2D'}}>-{fmt(totalSalidas)}</td>
-                    <td style={{color:'#185FA5'}}>{fmt(saldoFinal)}</td>
-                    <td></td>
-                  </tr>}
-                </tbody>
-              </table>
+      {tab === 'movimientos' && (
+        <>
+          <div className="filtros">
+            <div className="sw" style={{ flex: 1, minWidth: 200 }}>
+              <ILupa />
+              <input className="si" placeholder="Filtrar movimientos..." value={busq}
+                onChange={e => { setBusq(e.target.value); setBuscado(!!e.target.value) }} />
             </div>
           </div>
-        )}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {carg ? <div className="sc"><div className="sp" /></div> : (
+              <div className="tw"><table>
+                <thead><tr><th>Fecha/Hora</th><th>Profesional</th><th>Detalle</th><th>Entradas</th><th>Salidas</th><th>Saldo</th><th>Cargado por</th></tr></thead>
+                <tbody>
+                  {saldoI > 0 && <tr><td className="cgr">—</td><td>—</td><td>Saldo inicial</td><td className="cve fw6">{fmtMonto(saldoI)}</td><td>—</td><td className="fw6">{fmtMonto(saldoI)}</td><td className="cgr">Sistema</td></tr>}
+                  {movsVis.length === 0 && <tr><td colSpan="7" className="emt">Sin movimientos</td></tr>}
+                  {movsVis.map((m, i) => (
+                    <tr key={i}>
+                      <td className="cgr" style={{ fontSize: 12 }}>{m.fecha} {m.hora}</td>
+                      <td>{m.profesionalNombre || '—'}</td>
+                      <td>{m.descripcion}</td>
+                      <td className="cve fw6">{m.tipo === 'entrada' ? `+${fmtMonto(m.importe)}` : '—'}</td>
+                      <td className="cro fw6">{m.tipo !== 'entrada' ? `-${fmtMonto(m.importe)}` : '—'}</td>
+                      <td className="fw6">{fmtMonto(saldoFila(movs.indexOf(m)))}</td>
+                      <td className="cgr" style={{ fontSize: 12 }}>{m.cargadoPorNombre}</td>
+                    </tr>
+                  ))}
+                  <tr className="ttr"><td colSpan="3">Total del mes</td><td className="cve">+{fmtMonto(entradas)}</td><td className="cro">-{fmtMonto(salidas)}</td><td className="caz">{fmtMonto(saldoF)}</td><td /></tr>
+                </tbody>
+              </table></div>
+            )}
+          </div>
+        </>
+      )}
 
-        {tab==='transferencias' && (
-          <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Fecha</th><th>Destinatario</th><th>Detalle</th><th>Importe</th><th>Cargado por</th></tr></thead>
-                <tbody>
-                  {transferencias.length===0
-                    ? <tr><td colSpan="5" style={{textAlign:'center',padding:'30px',color:'#888'}}>Sin transferencias este mes</td></tr>
-                    : transferencias.map(m=>(
-                      <tr key={m.id}>
-                        <td style={{color:'#888'}}>{m.timestamp?.toDate?.()?.toLocaleDateString('es-AR')||'—'}</td>
-                        <td>{m.destinatario||'—'}</td>
-                        <td>{m.detalle}</td>
-                        <td style={{color:'#A32D2D',fontWeight:'500'}}>-{fmt(m.importe)}</td>
-                        <td style={{color:'#888'}}>{m.cargadoPorNombre}</td>
-                      </tr>
-                    ))
-                  }
-                  {transferencias.length>0 && <tr className="total-row">
-                    <td colSpan="3">Total transferencias</td>
-                    <td style={{color:'#A32D2D'}}>-{fmt(transferencias.reduce((s,m)=>s+m.importe,0))}</td>
-                    <td></td>
-                  </tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+      {tab === 'transferencias' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="tw"><table>
+            <thead><tr><th>Fecha/Hora</th><th>Detalle</th><th>Importe</th><th>Cargado por</th></tr></thead>
+            <tbody>
+              {transf.length === 0 && <tr><td colSpan="4" className="emt">Sin transferencias este mes</td></tr>}
+              {transf.map((m, i) => <tr key={i}><td className="cgr" style={{ fontSize: 12 }}>{m.fecha} {m.hora}</td><td>{m.descripcion}</td><td className="cro fw6">-{fmtMonto(m.importe)}</td><td className="cgr" style={{ fontSize: 12 }}>{m.cargadoPorNombre}</td></tr>)}
+              {transf.length > 0 && <tr className="ttr"><td colSpan="2">Total</td><td className="cro">-{fmtMonto(transf.reduce((a, m) => a + m.importe, 0))}</td><td /></tr>}
+            </tbody>
+          </table></div>
+        </div>
+      )}
 
-        {tab==='resumen' && (
-          <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Profesional</th><th>Sesiones cobradas</th><th>Total facturado</th></tr></thead>
-                <tbody>
-                  {resumenKines.length===0
-                    ? <tr><td colSpan="3" style={{textAlign:'center',padding:'30px',color:'#888'}}>Sin datos este mes</td></tr>
-                    : <>{resumenKines.map(k=>(
-                        <tr key={k.id}>
-                          <td>{k.apellido} {k.nombre}</td>
-                          <td>{k.sesiones}</td>
-                          <td style={{color:'#3B6D11',fontWeight:'500'}}>{fmt(k.total)}</td>
-                        </tr>
-                      ))}
-                      <tr className="total-row">
-                        <td>Total</td>
-                        <td>{resumenKines.reduce((s,k)=>s+k.sesiones,0)}</td>
-                        <td style={{color:'#185FA5'}}>{fmt(resumenKines.reduce((s,k)=>s+k.total,0))}</td>
-                      </tr>
-                    </>
-                  }
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </>}
+      {tab === 'resumen' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="tw"><table>
+            <thead><tr><th>Profesional</th><th>Sesiones</th><th>Total facturado</th></tr></thead>
+            <tbody>
+              {resumenK.length === 0 && <tr><td colSpan="3" className="emt">Sin datos este mes</td></tr>}
+              {resumenK.map(k => <tr key={k.id}><td className="fw6">{k.apellido} {k.nombre}</td><td>{k.ses}</td><td className="cve fw6">{fmtMonto(k.total)}</td></tr>)}
+              {resumenK.length > 0 && <tr className="ttr"><td>Total</td><td>{resumenK.reduce((a, k) => a + k.ses, 0)}</td><td className="caz">{fmtMonto(resumenK.reduce((a, k) => a + k.total, 0))}</td></tr>}
+            </tbody>
+          </table></div>
+        </div>
+      )}
 
       {modal && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200}}>
-          <div style={{background:'#fff',borderRadius:'12px',padding:'24px',width:'100%',maxWidth:'440px',margin:'16px'}}>
-            <div style={{fontSize:'16px',fontWeight:'600',marginBottom:'18px'}}>Nuevo movimiento — {labelMes(mes)}</div>
-            <form onSubmit={guardar}>
-              <div className="form-grid" style={{marginBottom:'14px'}}>
-                <div className="form-field"><label>Tipo *</label>
-                  <select value={form.tipo} onChange={e=>setF('tipo',e.target.value)}>
-                    <option value="entrada">Entrada</option>
-                    <option value="salida">Salida</option>
-                  </select>
-                </div>
-                <div className="form-field"><label>Importe *</label>
-                  <input type="number" min="0" step="0.01" value={form.importe} onChange={e=>setF('importe',e.target.value)} placeholder="Ej: 8500" required />
-                </div>
-                <div className="form-field full"><label>Detalle *</label>
-                  <input value={form.detalle} onChange={e=>setF('detalle',e.target.value)} placeholder="Ej: Pago sesión — García Juan" required />
-                </div>
-                <div className="form-field full"><label>Profesional (opcional)</label>
-                  <select value={form.profesionalId} onChange={e=>setF('profesionalId',e.target.value)}>
-                    <option value="">Sin profesional</option>
-                    {kines.map(k=><option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
-                  </select>
-                </div>
-                <div className="form-field full" style={{flexDirection:'row',alignItems:'center',gap:'8px'}}>
-                  <input type="checkbox" id="esTrans" checked={form.esTransferencia} onChange={e=>setF('esTransferencia',e.target.checked)} />
-                  <label htmlFor="esTrans" style={{margin:0,cursor:'pointer'}}>Es una transferencia</label>
-                </div>
-                {form.esTransferencia && (
-                  <div className="form-field full"><label>Destinatario</label>
-                    <input value={form.destinatario} onChange={e=>setF('destinatario',e.target.value)} placeholder="Ej: Luis, Germán..." />
-                  </div>
-                )}
+        <div className="mo" onClick={e => e.target === e.currentTarget && setModal(false)}>
+          <div className="mc">
+            <div className="mt">Nuevo movimiento</div>
+            <form onSubmit={guardarMov}>
+              <div className="ff" style={{ marginBottom: 12 }}><label>Tipo</label>
+                <select value={fMov.tipo} onChange={e => setF('tipo', e.target.value)}>
+                  <option value="entrada">Entrada</option>
+                  <option value="salida">Salida</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="saldoInicial">Saldo inicial del mes</option>
+                </select>
               </div>
-              <div className="row-end">
-                <button type="button" className="btn btn-secondary" onClick={()=>setModal(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving?'Guardando...':'Guardar'}</button>
+              <div className="ff" style={{ marginBottom: 12 }}><label>Descripción *</label><input value={fMov.desc} onChange={e => setF('desc', e.target.value)} placeholder="Ej: Pago sesión García" required /></div>
+              <div className="ff" style={{ marginBottom: 12 }}><label>Importe *</label><input type="number" min="0" step="0.01" value={fMov.importe} onChange={e => setF('importe', e.target.value)} placeholder="Ej: 8500" required /></div>
+              {fMov.tipo === 'entrada' && (
+                <div className="ff" style={{ marginBottom: 12 }}><label>Profesional (opcional)</label>
+                  <select value={fMov.kineId} onChange={e => setF('kineId', e.target.value)}>
+                    <option value="">Sin profesional</option>
+                    {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+                  </select>
+                </div>
+              )}
+              <div className="re" style={{ marginTop: 18 }}>
+                <button type="button" className="btn bs" onClick={() => setModal(false)}>Cancelar</button>
+                <button type="submit" className="btn bp" disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
               </div>
             </form>
           </div>
@@ -267,3 +213,4 @@ export default function Caja() {
     </div>
   )
 }
+export default Caja
