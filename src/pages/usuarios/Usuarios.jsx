@@ -1,147 +1,134 @@
 import { useEffect, useState } from 'react'
-import { collection, getDocs, doc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
-import { registrarLog, ROLES } from '../../utils/helpers'
+import { useCache } from '../../context/AppCache'
+import { escribirLog, ROLES } from '../../utils/helpers'
 
-const ROLES_OPCIONES = ['dueno', 'kinesiologo', 'secretaria']
+const ILupa = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
 
 export default function Usuarios() {
-  const { currentUser, userProfile } = useAuth()
-  const [usuarios, setUsuarios] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [editando, setEditando] = useState(null)
-  const [saving, setSaving] = useState(false)
+  const { user, perfil } = useAuth()
+  const { getUsuarios, invalidarUsers } = useCache()
+  const [todos, setTodos]   = useState([])
+  const [carg, setCarg]     = useState(true)
+  const [busq, setBusq]     = useState('')
+  const [buscado, setBuscado] = useState(false)
+
+  async function cargar() {
+    setCarg(true)
+    const u = await getUsuarios(true)
+    setTodos(u); setCarg(false)
+  }
 
   useEffect(() => { cargar() }, [])
 
-  async function cargar() {
-    setLoading(true)
-    const snap = await getDocs(collection(db, 'usuarios'))
-    setUsuarios(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => {
-      if (a.estado === 'pendiente' && b.estado !== 'pendiente') return -1
-      if (b.estado === 'pendiente' && a.estado !== 'pendiente') return 1
-      return (a.apellido||'').localeCompare(b.apellido||'')
-    }))
-    setLoading(false)
+  async function upd(id, data, logAcc, logDet) {
+    await updateDoc(doc(db, 'usuarios', id), { ...data, actualizadoEn: serverTimestamp() })
+    await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, logAcc, logDet)
+    invalidarUsers(); cargar()
   }
 
-  async function aprobar(u) {
-    setSaving(true)
-    await updateDoc(doc(db, 'usuarios', u.id), { estado: 'activo', rol: u.rol || 'secretaria', aprobadoEn: serverTimestamp() })
-    await registrarLog(currentUser.uid, `${userProfile.apellido} ${userProfile.nombre}`, 'Aprobación usuario', `Aprobó a ${u.apellido} ${u.nombre} como ${u.rol || 'secretaria'}`)
-    cargar()
-    setSaving(false)
-  }
+  const pend  = todos.filter(u => u.estado === 'pendiente')
+  const activ = todos.filter(u => u.estado === 'activo')
+  const inact = todos.filter(u => u.estado === 'inactivo')
 
-  async function rechazar(u) {
-    if (!confirm(`¿Rechazar la cuenta de ${u.apellido} ${u.nombre}?`)) return
-    await updateDoc(doc(db, 'usuarios', u.id), { estado: 'rechazado' })
-    await registrarLog(currentUser.uid, `${userProfile.apellido} ${userProfile.nombre}`, 'Rechazo usuario', `Rechazó a ${u.apellido} ${u.nombre}`)
-    cargar()
-  }
+  // Filtrado en memoria con lupa
+  const activVis = !buscado ? activ : activ.filter(u =>
+    `${u.apellido} ${u.nombre} ${u.email}`.toLowerCase().includes(busq.toLowerCase())
+  )
 
-  async function guardarEdicion() {
-    if (!editando) return
-    setSaving(true)
-    await updateDoc(doc(db, 'usuarios', editando.id), { rol: editando.rol, estado: editando.estado })
-    await registrarLog(currentUser.uid, `${userProfile.apellido} ${userProfile.nombre}`, 'Edición usuario', `Modificó rol/estado de ${editando.apellido} ${editando.nombre}`)
-    setEditando(null)
-    cargar()
-    setSaving(false)
-  }
+  const bR = (r) => { const m={dueno:'ba',kinesiologo:'bb',secretaria:'bk'}; return <span className={`badge ${m[r]||'bk'}`}>{ROLES[r]||r}</span> }
+  const bE = (e) => { const m={activo:'bg',pendiente:'ba',inactivo:'br'}; const l={activo:'Activo',pendiente:'Pendiente',inactivo:'Inactivo'}; return <span className={`badge ${m[e]||'bk'}`}>{l[e]||e}</span> }
 
-  const pendientes = usuarios.filter(u => u.estado === 'pendiente')
-  const activos = usuarios.filter(u => u.estado !== 'pendiente')
-
-  const badgeRol = (rol) => {
-    if (rol === 'dueno') return <span className="badge badge-purple">Dueño</span>
-    if (rol === 'kinesiologo') return <span className="badge badge-blue">Kinesiológo</span>
-    if (rol === 'secretaria') return <span className="badge badge-gray">Secretaria</span>
-    return <span className="badge badge-amber">Sin rol</span>
-  }
-
-  const badgeEstado = (estado) => {
-    if (estado === 'activo') return <span className="badge badge-green">Activo</span>
-    if (estado === 'pendiente') return <span className="badge badge-amber">Pendiente</span>
-    if (estado === 'rechazado') return <span className="badge badge-red">Rechazado</span>
-    return <span className="badge badge-gray">{estado}</span>
-  }
+  if (carg) return <div className="sc"><div className="sp" /></div>
 
   return (
     <div>
-      <h1 style={{fontSize:'20px', fontWeight:'600', marginBottom:'20px'}}>Usuarios</h1>
+      <div className="ph"><div className="ptitle">Gestión de usuarios</div></div>
 
-      {pendientes.length > 0 && (
-        <div className="alert alert-amber">{pendientes.length} usuario{pendientes.length > 1 ? 's' : ''} pendiente{pendientes.length > 1 ? 's' : ''} de aprobación</div>
-      )}
+      {pend.length > 0 && <div className="al ala">{pend.length} usuario{pend.length > 1 ? 's' : ''} pendiente{pend.length > 1 ? 's' : ''} de aprobación</div>}
 
-      {loading ? <div className="loading-center"><div className="spinner" /></div> : (
-        <div className="card" style={{padding:0, overflow:'hidden'}}>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
-              <tbody>
-                {usuarios.map(u => (
-                  <tr key={u.id}>
-                    <td><strong>{u.apellido}</strong> {u.nombre}</td>
-                    <td style={{color:'#888', fontSize:'12px'}}>{u.email}</td>
-                    <td>{badgeRol(u.rol)}</td>
-                    <td>{badgeEstado(u.estado)}</td>
-                    <td>
-                      {u.estado === 'pendiente' ? (
-                        <div style={{display:'flex', gap:'6px', alignItems:'center'}}>
-                          <select
-                            style={{fontSize:'12px', padding:'4px 8px', border:'1px solid #ddd', borderRadius:'6px'}}
-                            defaultValue="secretaria"
-                            onChange={e => u._rolTemp = e.target.value}
-                          >
-                            {ROLES_OPCIONES.map(r => <option key={r} value={r}>{ROLES[r]}</option>)}
-                          </select>
-                          <button className="btn btn-success btn-sm" disabled={saving}
-                            onClick={() => aprobar({ ...u, rol: u._rolTemp || 'secretaria' })}>
-                            Aprobar
-                          </button>
-                          <button className="btn btn-danger btn-sm" onClick={() => rechazar(u)}>Rechazar</button>
-                        </div>
-                      ) : u.id !== currentUser.uid ? (
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditando({...u})}>Editar</button>
-                      ) : (
-                        <span style={{fontSize:'12px', color:'#999'}}>Tu cuenta</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {pend.length > 0 && (
+        <div className="card">
+          <div className="card-title">Pendientes de aprobación</div>
+          <div className="tw"><table>
+            <thead><tr><th>Nombre</th><th>Email</th><th>Rol solicitado</th><th>Asignar rol</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {pend.map(u => (
+                <tr key={u.id}>
+                  <td className="fw6">{u.apellido} {u.nombre}</td>
+                  <td className="cgr">{u.email}</td>
+                  <td>{bR(u.rol)}</td>
+                  <td>
+                    <select defaultValue={u.rol} id={`r-${u.id}`} style={{ padding: '5px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 12 }}>
+                      <option value="secretaria">Secretaria</option>
+                      <option value="kinesiologo">Kinesiológo</option>
+                      <option value="dueno">Dueño</option>
+                    </select>
+                  </td>
+                  <td>
+                    <div className="row">
+                      <button className="btn bsuc bsm" onClick={() => upd(u.id, { estado: 'activo', rol: document.getElementById(`r-${u.id}`).value }, 'Aprobó usuario', `${u.apellido} ${u.nombre}`)}>Aprobar</button>
+                      <button className="btn bd bsm" onClick={() => upd(u.id, { estado: 'rechazado' }, 'Rechazó usuario', `${u.apellido} ${u.nombre}`)}>Rechazar</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
         </div>
       )}
 
-      {/* Modal edición */}
-      {editando && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200}}>
-          <div style={{background:'#fff', borderRadius:'12px', padding:'24px', width:'100%', maxWidth:'380px', margin:'16px'}}>
-            <div style={{fontSize:'16px', fontWeight:'600', marginBottom:'16px'}}>Editar usuario</div>
-            <div style={{fontSize:'14px', marginBottom:'14px'}}>{editando.apellido} {editando.nombre}</div>
-            <div className="form-field" style={{marginBottom:'12px'}}>
-              <label>Rol</label>
-              <select value={editando.rol} onChange={e => setEditando(u => ({...u, rol: e.target.value}))}>
-                {ROLES_OPCIONES.map(r => <option key={r} value={r}>{ROLES[r]}</option>)}
-              </select>
-            </div>
-            <div className="form-field" style={{marginBottom:'18px'}}>
-              <label>Estado</label>
-              <select value={editando.estado} onChange={e => setEditando(u => ({...u, estado: e.target.value}))}>
-                <option value="activo">Activo</option>
-                <option value="rechazado">Desactivado</option>
-              </select>
-            </div>
-            <div className="row-end">
-              <button className="btn btn-secondary" onClick={() => setEditando(null)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={guardarEdicion} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
-            </div>
+      <div className="card">
+        <div className="card-title">Usuarios activos ({activ.length})</div>
+        <div className="filtros">
+          <div className="sw" style={{ flex: 1, minWidth: 200 }}>
+            <ILupa />
+            <input className="si" placeholder="Buscar usuario..." value={busq}
+              onChange={e => { setBusq(e.target.value); setBuscado(!!e.target.value) }} />
           </div>
+        </div>
+        <div className="tw"><table>
+          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody>
+            {activVis.length === 0 && <tr><td colSpan="5" className="emt">{buscado ? 'No se encontraron usuarios' : 'Sin usuarios activos'}</td></tr>}
+            {activVis.map(u => (
+              <tr key={u.id}>
+                <td className="fw6">{u.apellido} {u.nombre}</td>
+                <td className="cgr" style={{ fontSize: 12 }}>{u.email}</td>
+                <td>
+                  <select value={u.rol} onChange={e => upd(u.id, { rol: e.target.value }, 'Cambió rol', `${u.apellido} ${u.nombre} → ${e.target.value}`)}
+                    style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 12, background: '#fff' }}>
+                    <option value="secretaria">Secretaria</option>
+                    <option value="kinesiologo">Kinesiológo</option>
+                    <option value="dueno">Dueño</option>
+                  </select>
+                </td>
+                <td>{bE(u.estado)}</td>
+                <td>{u.id !== user.uid && <button className="btn bd bsm" onClick={() => upd(u.id, { estado: 'inactivo' }, 'Desactivó usuario', `${u.apellido} ${u.nombre}`)}>Desactivar</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </div>
+
+      {inact.length > 0 && (
+        <div className="card">
+          <div className="card-title cgr">Usuarios inactivos ({inact.length})</div>
+          <div className="tw"><table>
+            <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {inact.map(u => (
+                <tr key={u.id} style={{ opacity: .7 }}>
+                  <td>{u.apellido} {u.nombre}</td>
+                  <td className="cgr" style={{ fontSize: 12 }}>{u.email}</td>
+                  <td>{bR(u.rol)}</td>
+                  <td><button className="btn bsuc bsm" onClick={() => upd(u.id, { estado: 'activo' }, 'Reactivó usuario', `${u.apellido} ${u.nombre}`)}>Reactivar</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
         </div>
       )}
     </div>
