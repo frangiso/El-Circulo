@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useCache } from '../../context/AppCache'
@@ -13,15 +13,16 @@ const ILupa = () => (
 
 export default function Reportes() {
   const { getUsuarios, getPacientes } = useCache()
-  const [mes, setMes]     = useState(mesActual())
-  const [kines, setKines] = useState([])
-  const [secs, setSecs]   = useState([])
-  const [totalP, setTP]   = useState(0)
-  const [turnos, setT]    = useState([])
-  const [carg, setCarg]   = useState(true)
-  const [busqK, setBK]    = useState('')
-  const [buscadoK, setBK2] = useState(false)
+  const [mes, setMes]       = useState(mesActual())
+  const [kines, setKines]   = useState([])
+  const [secs, setSecs]     = useState([])
+  const [totalP, setTP]     = useState(0)
+  const [turnos, setT]      = useState([])
+  const [carg, setCarg]     = useState(false)
+  const [cargado, setCargado] = useState(false)
+  const [busqK, setBK]      = useState('')
 
+  // Usuarios y pacientes desde caché — sin leer turnos todavía
   useEffect(() => {
     Promise.all([getUsuarios(), getPacientes()]).then(([u, p]) => {
       setKines(u.filter(x => x.rol === 'kinesiologo' || x.rol === 'dueno'))
@@ -30,22 +31,28 @@ export default function Reportes() {
     })
   }, [])
 
-  useEffect(() => {
+  // Lee turnos solo cuando el usuario hace clic en Buscar
+  async function cargarReporte() {
     setCarg(true)
-    setBK('')
-    setBK2(false)
     const parts = mes.split('-')
-    const y = parts[0]
-    const m = parts[1]
-    getDocs(query(
+    const y = parts[0], m = parts[1]
+    const snap = await getDocs(query(
       collection(db, 'turnos'),
       where('fecha', '>=', y + '-' + m + '-01'),
       where('fecha', '<=', y + '-' + m + '-31')
-    )).then(s => {
-      setT(s.docs.map(d => ({ id: d.id, ...d.data() })))
-      setCarg(false)
-    })
-  }, [mes])
+    ))
+    setT(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    setCargado(true)
+    setCarg(false)
+  }
+
+  // Cuando cambia el mes, resetear resultados
+  function onMesChange(m) {
+    setMes(m)
+    setCargado(false)
+    setT([])
+    setBK('')
+  }
 
   const porKine = kines.map(k => {
     const ts = turnos.filter(t => t.kinesiologoId === k.id)
@@ -58,7 +65,7 @@ export default function Reportes() {
 
   const total = porKine.reduce((a, k) => a + k.sesiones, 0)
 
-  const kinesVis = !buscadoK ? porKine : porKine.filter(k =>
+  const kinesVis = !busqK ? porKine : porKine.filter(k =>
     (k.apellido + ' ' + k.nombre).toLowerCase().includes(busqK.toLowerCase())
   )
 
@@ -66,12 +73,17 @@ export default function Reportes() {
     <div>
       <div className="ph">
         <div className="ptitle">Reportes</div>
-        <select value={mes} onChange={e => setMes(e.target.value)}
-          style={{ padding: '8px 11px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}>
-          {getMeses(12).map(m => (
-            <option key={m} value={m}>{labelMes(m)}</option>
-          ))}
-        </select>
+        <div className="row">
+          <select value={mes} onChange={e => onMesChange(e.target.value)}
+            style={{ padding: '8px 11px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}>
+            {getMeses(12).map(m => (
+              <option key={m} value={m}>{labelMes(m)}</option>
+            ))}
+          </select>
+          <button className="btn bp" onClick={cargarReporte} disabled={carg}>
+            {carg ? 'Cargando...' : 'Ver reporte'}
+          </button>
+        </div>
       </div>
 
       <div className="mets m3">
@@ -80,7 +92,15 @@ export default function Reportes() {
         <div className="met"><div className="met-l">Kinesiológos</div><div className="met-v">{kines.length}</div></div>
       </div>
 
-      {carg ? (
+      {!cargado ? (
+        <div className="card">
+          <div className="empty-search">
+            <ILupa />
+            <p>Elegí el mes y hacé clic en "Ver reporte"</p>
+            <span>Se cargan los datos solo cuando los pedís</span>
+          </div>
+        </div>
+      ) : carg ? (
         <div className="sc"><div className="sp" /></div>
       ) : (
         <div>
@@ -90,7 +110,7 @@ export default function Reportes() {
               <div className="sw" style={{ flex: 1, minWidth: 200 }}>
                 <ILupa />
                 <input className="si" placeholder="Filtrar kinesiológo..."
-                  value={busqK} onChange={e => { setBK(e.target.value); setBK2(!!e.target.value) }} />
+                  value={busqK} onChange={e => setBK(e.target.value)} />
               </div>
             </div>
             <div className="tw">
