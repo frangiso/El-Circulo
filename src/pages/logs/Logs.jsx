@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useCache } from '../../context/AppCache'
@@ -12,24 +12,28 @@ const ILupa = () => (
 
 export default function Logs() {
   const { getUsuarios } = useCache()
-  const [logs, setLogs]       = useState([])
-  const [users, setUsers]     = useState([])
-  const [carg, setCarg]       = useState(true)
-  const [busq, setBusq]       = useState('')
-  const [filtroU, setFU]      = useState('')
-  const [filtroA, setFA]      = useState('')
-  const [filtroF, setFF]      = useState('')
+  const [logs, setLogs]     = useState([])
+  const [users, setUsers]   = useState([])
+  const [carg, setCarg]     = useState(false)
+  const [cargado, setCargado] = useState(false)
+  const [busq, setBusq]     = useState('')
+  const [filtroU, setFU]    = useState('')
+  const [filtroA, setFA]    = useState('')
+  const [filtroF, setFF]    = useState('')
 
+  // Usuarios desde caché al montar (sin leer logs todavía)
   useEffect(() => {
-    Promise.all([
-      getDocs(query(collection(db, 'logs'), orderBy('ts', 'desc'), limit(100))),
-      getUsuarios()
-    ]).then(([snap, u]) => {
-      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setUsers(u)
-      setCarg(false)
-    })
+    getUsuarios().then(setUsers)
   }, [])
+
+  // Lee logs solo cuando el usuario hace clic en Buscar
+  async function cargarLogs() {
+    setCarg(true)
+    const snap = await getDocs(query(collection(db, 'logs'), orderBy('ts', 'desc'), limit(100)))
+    setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    setCargado(true)
+    setCarg(false)
+  }
 
   const acciones = [...new Set(logs.map(l => l.accion))].sort()
 
@@ -42,9 +46,9 @@ export default function Logs() {
   })
 
   function bLog(a) {
-    const v = ['Nuevo turno', 'Nuevo paciente', 'Aprobó usuario', 'Reactivó paciente', 'Reactivó usuario']
-    const r = ['Rechazó usuario', 'Desactivó usuario', 'Borrado automático']
-    const am = ['Edición paciente', 'Cambió rol', 'Movimiento caja']
+    const v = ['Nuevo turno','Nuevo paciente','Aprobó usuario','Reactivó paciente','Reactivó usuario']
+    const r = ['Rechazó usuario','Desactivó usuario','Borrado automático']
+    const am = ['Edición paciente','Cambió rol','Movimiento caja']
     if (v.includes(a)) return <span className="badge bg">{a}</span>
     if (r.includes(a)) return <span className="badge br">{a}</span>
     if (am.includes(a)) return <span className="badge ba">{a}</span>
@@ -53,10 +57,21 @@ export default function Logs() {
 
   const hayFiltro = busq || filtroU || filtroA || filtroF
 
+  function limpiar() {
+    setBusq(''); setFU(''); setFA(''); setFF('')
+  }
+
   function renderContenido() {
-    if (carg) {
-      return <div className="sc"><div className="sp" /></div>
+    if (!cargado) {
+      return (
+        <div className="empty-search">
+          <ILupa />
+          <p>Hacé clic en "Cargar actividad" para ver los registros</p>
+          <span>Se muestran los últimos 100 eventos del sistema</span>
+        </div>
+      )
     }
+    if (carg) return <div className="sc"><div className="sp" /></div>
     if (vis.length === 0) {
       return (
         <div className="empty-search">
@@ -98,6 +113,9 @@ export default function Logs() {
     <div>
       <div className="ph">
         <div className="ptitle">Registro de actividad</div>
+        <button className="btn bp" onClick={cargarLogs} disabled={carg}>
+          {carg ? 'Cargando...' : cargado ? 'Actualizar' : 'Cargar actividad'}
+        </button>
       </div>
 
       <div className="filtros">
@@ -120,9 +138,7 @@ export default function Logs() {
           ))}
         </select>
         {hayFiltro && (
-          <button className="btn bs bsm" onClick={() => { setBusq(''); setFU(''); setFA(''); setFF('') }}>
-            Limpiar
-          </button>
+          <button className="btn bs bsm" onClick={limpiar}>Limpiar</button>
         )}
       </div>
 
@@ -130,9 +146,11 @@ export default function Logs() {
         {renderContenido()}
       </div>
 
-      <div style={{ fontSize: 12, color: '#aaa', marginTop: 8, textAlign: 'right' }}>
-        Últimos 100 registros
-      </div>
+      {cargado && (
+        <div style={{ fontSize: 12, color: '#aaa', marginTop: 8, textAlign: 'right' }}>
+          Últimos 100 registros
+        </div>
+      )}
     </div>
   )
 }
