@@ -117,10 +117,14 @@ export default function NuevoTurno() {
           </div>
         </div>
 
-        {est==='vencido'&&<div className="al alr">⚠ El plan de este paciente está vencido.</div>}
-        {venc&&<div className={`al ${dias<=0?'alr':dias<=10?'ala':'alb'}`}>
-          Plan: {f.totSes} sesiones · Vence: {venc} · {dias} días hábiles restantes
-        </div>}
+        {est === 'vencido' && (
+          <div className="al alr">El plan de este paciente esta vencido.</div>
+        )}
+        {venc && (
+          <div className={'al ' + (dias <= 0 ? 'alr' : dias <= 10 ? 'ala' : 'alb')}>
+            Plan: {f.totSes} sesiones - Vence: {venc} - {dias} dias habiles restantes
+          </div>
+        )}
 
         <div className="card">
           <div className="card-title">Plan del paciente</div>
