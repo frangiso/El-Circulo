@@ -16,5 +16,8 @@ service cloud.firestore {
     match /caja/{id}      { allow read, write: if isActive(); }
     match /logs/{id}      { allow read, create: if isActive(); }
     match /obrasSociales/{id} { allow read, write: if isActive(); }
+
+    // Config del sistema — todos pueden leer, cualquier activo puede escribir
+    match /config/{id}    { allow read, write: if isActive(); }
   }
 }
