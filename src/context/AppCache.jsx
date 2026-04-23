@@ -6,7 +6,7 @@ import { OBRAS_BASE, estadoPlan, fechaHaceNMeses, escribirLog, hoy } from '../ut
 
 const Ctx = createContext()
 export const useCache = () => useContext(Ctx)
-const TTL = 10 * 60 * 1000
+const TTL = 30 * 60 * 1000 // 30 minutos
 
 export function CacheProvider({ children }) {
   const s = useRef({})
