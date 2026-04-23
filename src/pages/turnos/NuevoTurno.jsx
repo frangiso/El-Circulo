@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, addDoc, doc, updateDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore'
+import { collection, addDoc, doc, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
@@ -144,8 +144,6 @@ export default function NuevoTurno() {
         })
         invalidarPacs()
       }
-      await escribirLog(user.uid, perfil.apellido + ' ' + perfil.nombre, 'Nuevo turno',
-        pacSel.apellido + ' ' + pacSel.nombre + ' — ' + f.hora + 'hs')
       navigate('/turnos')
     } catch (err) { console.error(err); alert('Error al guardar') }
     setLoading(false)
@@ -161,9 +159,12 @@ export default function NuevoTurno() {
       const fechas = generarFechasFijas()
       const grupoId = Date.now().toString()
 
-      for (let i = 0; i < fechas.length; i++) {
-        await addDoc(collection(db, 'turnos'), {
-          fecha: fechas[i], hora: fijo.hora,
+      // writeBatch: todos los turnos fijos en 1 sola operación
+      const batch = writeBatch(db)
+      fechas.forEach((fecha, i) => {
+        const ref = doc(collection(db, 'turnos'))
+        batch.set(ref, {
+          fecha, hora: fijo.hora,
           pacienteId: pacSel.id, pacienteNombre: pacSel.nombre,
           pacienteApellido: pacSel.apellido, pacienteDni: pacSel.dni || '',
           obraSocial: pacSel.obraSocial || '',
@@ -176,7 +177,9 @@ export default function NuevoTurno() {
           creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
           ts: serverTimestamp()
         })
-      }
+      })
+      await batch.commit()
+      // 1 solo log para todos los turnos fijos (no 1 por turno)
       await escribirLog(user.uid, perfil.apellido + ' ' + perfil.nombre, 'Turnos fijos',
         pacSel.apellido + ' ' + pacSel.nombre + ' — ' + fechas.length + ' turnos los ' + DIAS_SEMANA[parseInt(fijo.diaSemana)])
       navigate('/turnos')
