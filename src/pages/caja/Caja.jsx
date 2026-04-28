@@ -121,9 +121,10 @@ export default function Caja() {
         <div className="sc"><div className="sp"/></div>
       ) : (
         <div>
-          <div className="mets m4" style={{marginBottom:16}}>
+          <div className="mets" style={{marginBottom:16, gridTemplateColumns:'repeat(5,1fr)'}}>
             <div className="met"><div className="met-l">Saldo inicial</div><div className="met-v">{fmtMonto(saldoI)}</div></div>
-            <div className="met"><div className="met-l">Total entradas</div><div className="met-v cve">+{fmtMonto(entradas)}</div></div>
+            <div className="met"><div className="met-l">Entradas efectivo</div><div className="met-v cve">+{fmtMonto(efectivo)}</div></div>
+            <div className="met"><div className="met-l">Entradas transf.</div><div className="met-v caz">+{fmtMonto(transf)}</div></div>
             <div className="met"><div className="met-l">Total salidas</div><div className="met-v cro">-{fmtMonto(salidas)}</div></div>
             <div className="met"><div className="met-l">Debe haber en caja</div><div className="met-v caz">{fmtMonto(saldoF)}</div></div>
           </div>
