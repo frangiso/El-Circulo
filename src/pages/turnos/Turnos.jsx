@@ -68,6 +68,38 @@ function AsistenciaBtn({ turno, onCambio }) {
   )
 }
 
+
+function KineSelector({ turno, kines, onCambio }) {
+  const [editando, setEditando] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  async function cambiar(kineId) {
+    if (!kineId || kineId === turno.kinesiologoId) { setEditando(false); return }
+    setLoading(true)
+    await onCambio(turno, kineId)
+    setEditando(false)
+    setLoading(false)
+  }
+
+  if (editando) return (
+    <select autoFocus defaultValue={turno.kinesiologoId}
+      onChange={e => cambiar(e.target.value)}
+      onBlur={() => setEditando(false)}
+      disabled={loading}
+      style={{ fontSize: 12, padding: '3px 6px', border: '1px solid var(--az)', borderRadius: 6, background: '#fff' }}>
+      <option value="">Seleccioná...</option>
+      {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+    </select>
+  )
+
+  return (
+    <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+      <span style={{ fontSize: 12 }}>{turno.kinesiologoNombre}</span>
+      <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px' }} onClick={() => setEditando(true)}>✎</button>
+    </div>
+  )
+}
+
 export default function Turnos() {
   const navigate = useNavigate()
   const { getKines, getPacientes, invalidarPacs } = useCache()
@@ -161,6 +193,24 @@ export default function Turnos() {
     } catch (err) { console.error(err); alert('Error al actualizar') }
   }
 
+
+  async function cambiarKine(turno, kineId) {
+    try {
+      const kine = kines.find(k => k.id === kineId)
+      if (!kine) return
+      const batch = writeBatch(db)
+      batch.update(doc(db, 'turnos', turno.id), {
+        kinesiologoId: kineId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre
+      })
+      await batch.commit()
+      setTurnos(prev => prev.map(t => t.id === turno.id
+        ? { ...t, kinesiologoId: kineId, kinesiologoNombre: kine.apellido + ' ' + kine.nombre }
+        : t
+      ))
+    } catch (err) { console.error(err); alert('Error al cambiar kinesiológo') }
+  }
+
   // ── Datos para vista día ──────────────────────────────────
   const filtrados = turnos.filter(t => {
     const nom = (t.pacienteApellido + ' ' + t.pacienteNombre).toLowerCase()
@@ -250,7 +300,7 @@ export default function Turnos() {
                                   onClick={() => navigate('/pacientes/' + t.pacienteId)}>
                                   {t.pacienteApellido} {t.pacienteNombre}
                                 </div>
-                                <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{t.kinesiologoNombre}</div>
+                                <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}><KineSelector turno={t} kines={kines} onCambio={cambiarKine}/></div>
                                 {estP === 'vencido' && <div style={{ fontSize: 10, color: 'var(--ro)' }}>⚠ Vencido</div>}
                                 {estP === 'por-vencer' && <div style={{ fontSize: 10, color: 'var(--na)' }}>⚠ {diasHabilesRestantes(pac.plan.fechaVencimiento)}d</div>}
                                 <div style={{ marginTop: 3 }}>
@@ -333,7 +383,7 @@ export default function Turnos() {
                           {estP === 'por-vencer' && <div style={{ fontSize: 11, color: 'var(--na)', marginTop: 2 }}>⚠ Vence en {diasHabilesRestantes(pac.plan.fechaVencimiento)}d</div>}
                         </td>
                         <td>{t.obraSocial ? <span className="badge bb">{t.obraSocial}</span> : '—'}</td>
-                        <td>{t.kinesiologoNombre}</td>
+                        <td><KineSelector turno={t} kines={kines} onCambio={cambiarKine}/></td>
                         <td>{t.nroSesion ? t.nroSesion + '/' + (pac?.plan?.sesionesTotal || '?') : '—'}</td>
                         <td><PlanBadge p={pac} /></td>
                         <td><AsistenciaBtn turno={t} onCambio={cambiarAsistencia} /></td>
@@ -397,5 +447,3 @@ export default function Turnos() {
 
       {vista === 'dia' ? renderDia() : renderSemana()}
     </div>
-  )
-}
