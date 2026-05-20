@@ -8,28 +8,14 @@ import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE } from '../../utils/helpe
 
 const INIT = { nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'' }
 
-// Busca duplicados por DNI o por nombre+apellido exacto
+// Busca duplicados SOLO por DNI — pueden existir pacientes con el mismo nombre
 async function buscarDuplicado(nombre, apellido, dni, idExcluir) {
   const resultados = []
-
-  if (dni && dni.trim()) {
-    const snapDni = await getDocs(query(collection(db,'pacientes'), where('dni','==',dni.trim())))
-    snapDni.docs.forEach(d => {
-      if (d.id !== idExcluir) resultados.push({ id: d.id, ...d.data() })
-    })
-  }
-
-  if (resultados.length === 0 && nombre && apellido) {
-    const snapNombre = await getDocs(query(
-      collection(db,'pacientes'),
-      where('nombre','==',nombre.trim()),
-      where('apellido','==',apellido.trim())
-    ))
-    snapNombre.docs.forEach(d => {
-      if (d.id !== idExcluir) resultados.push({ id: d.id, ...d.data() })
-    })
-  }
-
+  if (!dni || !dni.trim()) return resultados
+  const snapDni = await getDocs(query(collection(db,'pacientes'), where('dni','==',dni.trim())))
+  snapDni.docs.forEach(d => {
+    if (d.id !== idExcluir) resultados.push({ id: d.id, ...d.data() })
+  })
   return resultados
 }
 
@@ -47,9 +33,9 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
     Promise.all([getKines(), getObras()]).then(([k,o]) => { setKines(k); setObras(o) })
   }, [])
 
-  // Verificar duplicado al salir del campo DNI o nombre/apellido
+  // Verificar duplicado al salir del campo DNI
   async function verificarDuplicado() {
-    if (!f.nombre && !f.apellido && !f.dni) return
+    if (!f.dni || !f.dni.trim()) return
     setChequando(true)
     const dupes = await buscarDuplicado(f.nombre, f.apellido, f.dni, idExcluir)
     setDuplicado(dupes.length > 0 ? dupes[0] : null)
@@ -86,14 +72,12 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
           <div className="ff">
             <label>Nombre *</label>
             <input value={f.nombre}
-              onChange={e => { set('nombre', e.target.value); setDuplicado(null) }}
-              onBlur={verificarDuplicado} required />
+              onChange={e => set('nombre', e.target.value)} required />
           </div>
           <div className="ff">
             <label>Apellido *</label>
             <input value={f.apellido}
-              onChange={e => { set('apellido', e.target.value); setDuplicado(null) }}
-              onBlur={verificarDuplicado} required />
+              onChange={e => set('apellido', e.target.value)} required />
           </div>
           <div className="ff">
             <label>DNI</label>
