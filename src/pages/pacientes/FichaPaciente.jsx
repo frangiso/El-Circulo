@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc, collection, query, where, getDocs, orderBy, updateDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, collection, query, where, getDocs, orderBy, updateDoc, writeBatch, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
@@ -11,7 +11,37 @@ function fmtFecha(s) {
   const [y,m,d] = s.split('-'); return `${d}/${m}/${y}`
 }
 
-// Fila del historial con opciones de editar kine y eliminar asistencia
+const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
+
+function necesitaToken(obraSocial) {
+  if (!obraSocial) return false
+  return OBRAS_TOKEN.some(o => obraSocial.toLowerCase().includes(o.toLowerCase()))
+}
+
+// Modal recordatorio de token
+function ModalToken({ obraSocial, onConfirmar, onCancelar }) {
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🔑</div>
+          <div className="mt" style={{ marginBottom: 6 }}>Recordatorio de token</div>
+          <div style={{ fontSize: 13, color: '#666', lineHeight: 1.6 }}>
+            Este paciente tiene <strong>{obraSocial}</strong>.<br />
+            Antes de registrar la sesión, recordá pedirle el <strong>token de autorización</strong> al paciente.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+          <button className="btn bs" style={{ flex: 1 }} onClick={onCancelar}>Cancelar</button>
+          <button className="btn bp" style={{ flex: 1 }} onClick={onConfirmar}>
+            ✓ Token pedido, registrar sesión
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
   const [editandoKine, setEditandoKine] = useState(false)
   const [loadingK, setLoadingK] = useState(false)
@@ -26,7 +56,7 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
   }
 
   async function eliminar() {
-    if (!window.confirm('¿Eliminar la asistencia de esta sesión? Se devolverá la sesión al plan.')) return
+    if (!window.confirm('¿Eliminar la asistencia? Se devolverá la sesión al plan.')) return
     setLoadingE(true)
     await onEliminarAsistencia(turno)
     setLoadingE(false)
@@ -75,13 +105,15 @@ export default function FichaPaciente() {
   const navigate = useNavigate()
   const { user, perfil } = useAuth()
   const { getKines, invalidarPacs } = useCache()
-  const [pac, setPac]           = useState(null)
-  const [turnos, setTurnos]     = useState([])
-  const [kines, setKines]       = useState([])
-  const [carg, setCarg]         = useState(true)
+  const [pac, setPac]             = useState(null)
+  const [turnos, setTurnos]       = useState([])
+  const [kines, setKines]         = useState([])
+  const [carg, setCarg]           = useState(true)
   const [kineSelId, setKineSelId] = useState('')
   const [registrando, setRegistrando] = useState(false)
-  const [exito, setExito]       = useState(false)
+  const [exito, setExito]         = useState(false)
+  const [modalToken, setModalToken] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
 
   useEffect(() => {
     async function cargar() {
@@ -104,9 +136,18 @@ export default function FichaPaciente() {
     cargar()
   }, [id])
 
-  // Registrar sesión rápida desde la ficha
-  async function registrarSesion() {
+  // Intento de registrar sesión — verifica si necesita token primero
+  function intentarRegistrar() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    if (necesitaToken(pac.obraSocial)) {
+      setModalToken(true) // mostrar recordatorio
+    } else {
+      registrarSesion()
+    }
+  }
+
+  async function registrarSesion() {
+    setModalToken(false)
     setRegistrando(true)
     try {
       const kine = kines.find(k => k.id === kineSelId)
@@ -130,7 +171,6 @@ export default function FichaPaciente() {
       })
       batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
       await batch.commit()
-
       const nuevoT = {
         id: turnoRef.id, fecha: hoyStr,
         hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
@@ -147,13 +187,10 @@ export default function FichaPaciente() {
     setRegistrando(false)
   }
 
-  // Eliminar asistencia — devuelve la sesión al plan
   async function eliminarAsistencia(turno) {
     try {
       const batch = writeBatch(db)
-      batch.update(doc(db,'turnos',turno.id), {
-        asistencia: 'pendiente', asistenciaTs: serverTimestamp()
-      })
+      batch.update(doc(db,'turnos',turno.id), { asistencia: 'pendiente', asistenciaTs: serverTimestamp() })
       const nuevasUsadas = Math.max(0, (pac.plan?.sesionesUsadas || 0) - 1)
       batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
       await batch.commit()
@@ -163,7 +200,6 @@ export default function FichaPaciente() {
     } catch(err) { console.error(err); alert('Error al eliminar asistencia') }
   }
 
-  // Cambiar kinesiológo de un turno del historial
   async function cambiarKineTurno(turno, kineId) {
     try {
       const kine = kines.find(k => k.id === kineId)
@@ -179,6 +215,19 @@ export default function FichaPaciente() {
     } catch(err) { console.error(err); alert('Error al cambiar kinesiológo') }
   }
 
+  // Eliminar paciente — borra el doc (los turnos quedan como historial)
+  async function eliminarPaciente() {
+    if (!window.confirm(`¿Eliminar a ${pac.apellido} ${pac.nombre}? Esta acción no se puede deshacer.`)) return
+    if (!window.confirm('Segunda confirmación: ¿estás seguro que querés eliminar este paciente?')) return
+    setEliminando(true)
+    try {
+      await deleteDoc(doc(db,'pacientes',id))
+      invalidarPacs()
+      navigate('/pacientes')
+    } catch(err) { console.error(err); alert('Error al eliminar') }
+    setEliminando(false)
+  }
+
   if (carg) return <div className="sc"><div className="sp" /></div>
   if (!pac) return null
 
@@ -188,9 +237,18 @@ export default function FichaPaciente() {
   const dias = plan?.fechaVencimiento ? diasHabilesRestantes(plan.fechaVencimiento) : null
   const ini  = ((pac.nombre?.[0]||'') + (pac.apellido?.[0]||'')).toUpperCase()
   const sesRestantes = plan ? (plan.sesionesTotal - (plan.sesionesUsadas || 0)) : null
+  const conToken = necesitaToken(pac.obraSocial)
 
   return (
     <div>
+      {modalToken && (
+        <ModalToken
+          obraSocial={pac.obraSocial}
+          onConfirmar={registrarSesion}
+          onCancelar={() => setModalToken(false)}
+        />
+      )}
+
       <div className="row" style={{ marginBottom: 20 }}>
         <button className="btn bs bsm" onClick={() => navigate('/pacientes')}>← Volver</button>
         <div className="ptitle" style={{ flex: 1 }}>Ficha de paciente</div>
@@ -198,11 +256,19 @@ export default function FichaPaciente() {
           {arch ? 'Reactivar / Editar' : 'Editar'}
         </button>
         {!arch && <button className="btn bp bsm" onClick={() => navigate('/turnos/nuevo')}>+ Turno</button>}
+        <button className="btn bd bsm" onClick={eliminarPaciente} disabled={eliminando}>
+          {eliminando ? 'Eliminando...' : 'Eliminar'}
+        </button>
       </div>
 
       {arch && <div className="al ala">Paciente archivado. Hacé clic en "Reactivar / Editar" para cargarlo de nuevo.</div>}
       {est === 'por-vencer' && !arch && <div className="al ala">⚠ El plan vence en {dias} días hábiles.</div>}
       {est === 'vencido' && !arch && <div className="al alr">⚠ El plan está vencido.</div>}
+      {conToken && (
+        <div className="al alb">
+          🔑 Este paciente tiene <strong>{pac.obraSocial}</strong> — recordá pedirle el <strong>token</strong> antes de cada sesión.
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div className="card">
@@ -261,7 +327,7 @@ export default function FichaPaciente() {
         </div>
       </div>
 
-      {/* Registro rápido de sesión */}
+      {/* Registro rápido */}
       {!arch && plan && est !== 'vencido' && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión de hoy</div>
@@ -274,8 +340,8 @@ export default function FichaPaciente() {
                 <option value="">Seleccioná kinesiológo...</option>
                 {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
               </select>
-              <button className="btn bp" onClick={registrarSesion} disabled={registrando || !kineSelId} style={{ minWidth:160 }}>
-                {registrando ? 'Registrando...' : '✓ Marcar asistencia'}
+              <button className="btn bp" onClick={intentarRegistrar} disabled={registrando || !kineSelId} style={{ minWidth:160 }}>
+                {registrando ? 'Registrando...' : conToken ? '🔑 ✓ Marcar asistencia' : '✓ Marcar asistencia'}
               </button>
               {exito && <div className="badge bg" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada — quedan {sesRestantes - 1} sesiones</div>}
             </div>
@@ -299,13 +365,9 @@ export default function FichaPaciente() {
               </thead>
               <tbody>
                 {turnos.map(t => (
-                  <FilaTurno
-                    key={t.id}
-                    turno={t}
-                    kines={kines}
+                  <FilaTurno key={t.id} turno={t} kines={kines}
                     onEliminarAsistencia={eliminarAsistencia}
-                    onCambiarKine={cambiarKineTurno}
-                  />
+                    onCambiarKine={cambiarKineTurno} />
                 ))}
               </tbody>
             </table>
