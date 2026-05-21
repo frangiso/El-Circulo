@@ -5,6 +5,12 @@ import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { estadoPlan, diasHabilesRestantes, hoy } from '../../utils/helpers'
 
+const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
+function necesitaToken(obraSocial) {
+  if (!obraSocial) return false
+  return OBRAS_TOKEN.some(o => obraSocial.toLowerCase().includes(o.toLowerCase()))
+}
+
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
@@ -14,7 +20,7 @@ const ILupa = () => (
 const DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
 
 function fmtFechaCor(s) {
-  const [y,m,d] = s.split('-'); return `${d}/${m}`
+  const [y,m,d] = s.split('-'); return d+'/'+m
 }
 
 function getLunesDeSemana(fechaRef) {
@@ -33,6 +39,27 @@ function getSemana(lunes) {
     dias.push(d.toISOString().split('T')[0])
   }
   return dias
+}
+
+function ModalToken({ obraSocial, onConfirmar, onCancelar }) {
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🔑</div>
+          <div className="mt" style={{ marginBottom: 6 }}>Recordatorio de token</div>
+          <div style={{ fontSize: 13, color: '#666', lineHeight: 1.6 }}>
+            Este paciente tiene <strong>{obraSocial}</strong>.<br />
+            Recordá pedirle el <strong>token de autorización</strong> antes de registrar la sesión.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+          <button className="btn bs" style={{ flex: 1 }} onClick={onCancelar}>Cancelar</button>
+          <button className="btn bp" style={{ flex: 1 }} onClick={onConfirmar}>✓ Token pedido, confirmar</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function PlanBadge({ p }) {
@@ -61,8 +88,8 @@ function AsistenciaBtn({ turno, onCambio }) {
   )
   return (
     <div className="row" style={{ gap: 4 }}>
-      <button className="btn bsuc bsm" onClick={() => marcar('asistio')} disabled={loading}>✓</button>
-      <button className="btn bd bsm" onClick={() => marcar('falto')} disabled={loading}>✗</button>
+      <button className="btn bsuc bsm" onClick={() => marcar('asistio')} disabled={loading}>✓ Asistió</button>
+      <button className="btn bd bsm" onClick={() => marcar('falto')} disabled={loading}>✗ Faltó</button>
     </div>
   )
 }
@@ -72,16 +99,11 @@ function KineSelector({ turno, kines, onCambio }) {
   const [loading, setLoading] = useState(false)
   async function cambiar(kineId) {
     if (!kineId || kineId === turno.kinesiologoId) { setEditando(false); return }
-    setLoading(true)
-    await onCambio(turno, kineId)
-    setEditando(false)
-    setLoading(false)
+    setLoading(true); await onCambio(turno, kineId); setEditando(false); setLoading(false)
   }
   if (editando) return (
     <select autoFocus defaultValue={turno.kinesiologoId}
-      onChange={e => cambiar(e.target.value)}
-      onBlur={() => setEditando(false)}
-      disabled={loading}
+      onChange={e => cambiar(e.target.value)} onBlur={() => setEditando(false)} disabled={loading}
       style={{ fontSize: 12, padding: '3px 6px', border: '1px solid var(--az)', borderRadius: 6, background: '#fff' }}>
       <option value="">Seleccioná...</option>
       {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
@@ -108,6 +130,7 @@ export default function Turnos() {
   const [busqNombre, setBN]     = useState('')
   const [buscado, setBuscado]   = useState(false)
   const [cargando, setCargando] = useState(false)
+  const [modalToken, setModalToken] = useState(null)
   const timer = useRef(null)
 
   useEffect(() => {
@@ -136,8 +159,7 @@ export default function Turnos() {
       collection(db,'turnos'),
       where('fecha','>=',semana[0]),
       where('fecha','<=',semana[6]),
-      orderBy('fecha'),
-      orderBy('hora')
+      orderBy('fecha'), orderBy('hora')
     ))
     setTurnos(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     setCargando(false)
@@ -154,9 +176,22 @@ export default function Turnos() {
 
   function cambiarVista(v) {
     setVista(v); setTurnos([]); setBuscado(false); setBN('')
-    if (v === 'semana') {
-      const nl = getLunesDeSemana(fecha); setLunes(nl); buscarSemana(nl)
+    if (v === 'semana') { const nl = getLunesDeSemana(fecha); setLunes(nl); buscarSemana(nl) }
+  }
+
+  // Intercepta asistencia si necesita token
+  function intentarCambiarAsistencia(turno, nuevoEst) {
+    if (nuevoEst === 'asistio' && necesitaToken(turno.obraSocial)) {
+      setModalToken({ turno, nuevoEst })
+      return
     }
+    cambiarAsistencia(turno, nuevoEst)
+  }
+
+  function confirmarToken() {
+    const { turno, nuevoEst } = modalToken
+    setModalToken(null)
+    cambiarAsistencia(turno, nuevoEst)
   }
 
   async function cambiarAsistencia(turno, nuevoEst) {
@@ -194,8 +229,7 @@ export default function Turnos() {
       })
       await batch.commit()
       setTurnos(prev => prev.map(t => t.id === turno.id
-        ? { ...t, kinesiologoId: kineId, kinesiologoNombre: kine.apellido + ' ' + kine.nombre }
-        : t
+        ? { ...t, kinesiologoId: kineId, kinesiologoNombre: kine.apellido + ' ' + kine.nombre } : t
       ))
     } catch(err) { console.error(err); alert('Error al cambiar kinesiológo') }
   }
@@ -237,11 +271,7 @@ export default function Turnos() {
                 <tr>
                   <th style={{ width: 55, padding: '8px 6px', background: '#f8f8f8', border: '1px solid #eee', textAlign: 'center', fontSize: 11 }}>Hora</th>
                   {semana.map((f, i) => (
-                    <th key={f} style={{
-                      padding: '8px 6px', border: '1px solid #eee', textAlign: 'center', fontSize: 11, minWidth: 110,
-                      background: f === hoy2 ? 'var(--azc)' : '#f8f8f8',
-                      color: f === hoy2 ? 'var(--az)' : 'inherit'
-                    }}>
+                    <th key={f} style={{ padding: '8px 6px', border: '1px solid #eee', textAlign: 'center', fontSize: 11, minWidth: 110, background: f === hoy2 ? 'var(--azc)' : '#f8f8f8', color: f === hoy2 ? 'var(--az)' : 'inherit' }}>
                       <div style={{ fontWeight: 700 }}>{DIAS[i]}</div>
                       <div style={{ fontWeight: 400, opacity: .7 }}>{fmtFechaCor(f)}</div>
                     </th>
@@ -251,9 +281,7 @@ export default function Turnos() {
               <tbody>
                 {horasSet.map(hora => (
                   <tr key={hora}>
-                    <td style={{ padding: '6px', border: '1px solid #eee', textAlign: 'center', fontWeight: 700, color: '#666', background: '#fafafa' }}>
-                      {hora}
-                    </td>
+                    <td style={{ padding: '6px', border: '1px solid #eee', textAlign: 'center', fontWeight: 700, color: '#666', background: '#fafafa' }}>{hora}</td>
                     {semana.map(f => {
                       const celdaTurnos = (gridData[f]?.[hora] || []).filter(t => kineFiltro ? t.kinesiologoId === kineFiltro : true)
                       return (
@@ -266,6 +294,7 @@ export default function Turnos() {
                               <div key={t.id} style={{ background: bg, borderRadius: 5, padding: '4px 6px', marginBottom: 3, border: '1px solid #e8e8e8' }}>
                                 <div style={{ fontWeight: 700, fontSize: 11, color: 'var(--az)', cursor: 'pointer' }} onClick={() => navigate('/pacientes/' + t.pacienteId)}>
                                   {t.pacienteApellido} {t.pacienteNombre}
+                                  {necesitaToken(t.obraSocial) && <span title="Pedir token"> 🔑</span>}
                                 </div>
                                 <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>
                                   <KineSelector turno={t} kines={kines} onCambio={cambiarKine} />
@@ -273,7 +302,7 @@ export default function Turnos() {
                                 {estP === 'vencido' && <div style={{ fontSize: 10, color: 'var(--ro)' }}>⚠ Vencido</div>}
                                 {estP === 'por-vencer' && <div style={{ fontSize: 10, color: 'var(--na)' }}>⚠ {diasHabilesRestantes(pac.plan.fechaVencimiento)}d</div>}
                                 <div style={{ marginTop: 3 }}>
-                                  <AsistenciaBtn turno={t} onCambio={cambiarAsistencia} />
+                                  <AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} />
                                 </div>
                               </div>
                             )
@@ -344,6 +373,7 @@ export default function Turnos() {
                         <td>
                           <div style={{ cursor: 'pointer', color: 'var(--az)' }} onClick={() => navigate('/pacientes/' + t.pacienteId)}>
                             {t.pacienteApellido} {t.pacienteNombre}
+                            {necesitaToken(t.obraSocial) && <span title="Pedir token"> 🔑</span>}
                           </div>
                           {estP === 'vencido' && <div style={{ fontSize: 11, color: 'var(--ro)', marginTop: 2 }}>⚠ Plan vencido</div>}
                           {estP === 'por-vencer' && <div style={{ fontSize: 11, color: 'var(--na)', marginTop: 2 }}>⚠ Vence en {diasHabilesRestantes(pac.plan.fechaVencimiento)}d</div>}
@@ -352,7 +382,7 @@ export default function Turnos() {
                         <td><KineSelector turno={t} kines={kines} onCambio={cambiarKine} /></td>
                         <td>{t.nroSesion ? t.nroSesion + '/' + (pac?.plan?.sesionesTotal || '?') : '—'}</td>
                         <td><PlanBadge p={pac} /></td>
-                        <td><AsistenciaBtn turno={t} onCambio={cambiarAsistencia} /></td>
+                        <td><AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} /></td>
                         <td>
                           <button className="btn bs bsm" style={{ fontSize: 11 }} onClick={() => navigate('/turnos/' + t.id + '/editar')}>Editar</button>
                         </td>
@@ -370,6 +400,13 @@ export default function Turnos() {
 
   return (
     <div>
+      {modalToken && (
+        <ModalToken
+          obraSocial={modalToken.turno.obraSocial}
+          onConfirmar={confirmarToken}
+          onCancelar={() => setModalToken(null)}
+        />
+      )}
       <div className="ph">
         <div className="ptitle">Turnos</div>
         <button className="btn bp" onClick={() => navigate('/turnos/nuevo')}>+ Nuevo turno</button>
