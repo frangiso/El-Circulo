@@ -94,7 +94,13 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
           </div>
         )}
         {turno.asistencia === 'falto' && <span className="badge br">Faltó</span>}
-        {(!turno.asistencia || turno.asistencia === 'pendiente') && <span className="badge bk">Pendiente</span>}
+        {(!turno.asistencia || turno.asistencia === 'pendiente') && (
+          <div className="row" style={{ gap: 4 }}>
+            <span className="badge bk">Pendiente</span>
+            <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--ro)' }}
+              onClick={eliminar} disabled={loadingE} title="Eliminar turno">✕</button>
+          </div>
+        )}
       </td>
     </tr>
   )
@@ -191,11 +197,15 @@ export default function FichaPaciente() {
     try {
       const batch = writeBatch(db)
       batch.delete(doc(db,'turnos',turno.id))
-      const nuevasUsadas = Math.max(0, (pac.plan?.sesionesUsadas || 0) - 1)
-      batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
-      await batch.commit()
+      if (turno.asistencia === 'asistio' && pac.plan) {
+        const nuevasUsadas = Math.max(0, (pac.plan?.sesionesUsadas || 0) - 1)
+        batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
+        await batch.commit()
+        setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
+      } else {
+        await batch.commit()
+      }
       setTurnos(prev => prev.filter(t => t.id !== turno.id))
-      setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
       invalidarPacs()
     } catch(err) { console.error(err); alert('Error al eliminar turno') }
   }
