@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { collection, query, where, getDocs, orderBy, doc, writeBatch, serverTimestamp } from 'firebase/firestore'
+import { collection, query, where, getDocs, orderBy, doc, writeBatch, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
@@ -70,20 +70,21 @@ function PlanBadge({ p }) {
   return <span className="badge bg">Ok</span>
 }
 
-function AsistenciaBtn({ turno, onCambio }) {
+function AsistenciaBtn({ turno, onCambio, onEliminar }) {
   const [loading, setLoading] = useState(false)
   const est = turno.asistencia || 'pendiente'
   async function marcar(v) { if (loading) return; setLoading(true); await onCambio(turno, v); setLoading(false) }
+  async function eliminar() { if (loading) return; setLoading(true); await onEliminar(turno); setLoading(false) }
   if (est === 'asistio') return (
     <div className="row" style={{ gap: 4 }}>
       <span className="badge bg">Asistió</span>
-      <button className="btn bs bsm" style={{ fontSize: 11, padding: '3px 7px' }} onClick={() => marcar('pendiente')} disabled={loading}>✕</button>
+      <button className="btn bs bsm" style={{ fontSize: 11, padding: '3px 7px' }} onClick={eliminar} disabled={loading}>✕</button>
     </div>
   )
   if (est === 'falto') return (
     <div className="row" style={{ gap: 4 }}>
       <span className="badge br">Faltó</span>
-      <button className="btn bs bsm" style={{ fontSize: 11, padding: '3px 7px' }} onClick={() => marcar('pendiente')} disabled={loading}>✕</button>
+      <button className="btn bs bsm" style={{ fontSize: 11, padding: '3px 7px' }} onClick={eliminar} disabled={loading}>✕</button>
     </div>
   )
   return (
@@ -218,6 +219,24 @@ export default function Turnos() {
     } catch(err) { console.error(err); alert('Error al actualizar') }
   }
 
+  async function eliminarTurno(turno) {
+    try {
+      const pac = mapaP[turno.pacienteId]
+      if (turno.asistencia === 'asistio' && pac?.plan) {
+        const n = Math.max(0, (pac.plan.sesionesUsadas || 0) - 1)
+        const batch = writeBatch(db)
+        batch.delete(doc(db,'turnos',turno.id))
+        batch.update(doc(db,'pacientes',turno.pacienteId), { 'plan.sesionesUsadas': n })
+        await batch.commit()
+        setMapaP(p => ({ ...p, [turno.pacienteId]: { ...pac, plan: { ...pac.plan, sesionesUsadas: n } } }))
+        invalidarPacs()
+      } else {
+        await deleteDoc(doc(db,'turnos',turno.id))
+      }
+      setTurnos(prev => prev.filter(t => t.id !== turno.id))
+    } catch(err) { console.error(err); alert('Error al eliminar turno') }
+  }
+
   async function cambiarKine(turno, kineId) {
     try {
       const kine = kines.find(k => k.id === kineId)
@@ -302,7 +321,7 @@ export default function Turnos() {
                                 {estP === 'vencido' && <div style={{ fontSize: 10, color: 'var(--ro)' }}>⚠ Vencido</div>}
                                 {estP === 'por-vencer' && <div style={{ fontSize: 10, color: 'var(--na)' }}>⚠ {diasHabilesRestantes(pac.plan.fechaVencimiento)}d</div>}
                                 <div style={{ marginTop: 3 }}>
-                                  <AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} />
+                                  <AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} onEliminar={eliminarTurno} />
                                 </div>
                               </div>
                             )
@@ -382,7 +401,7 @@ export default function Turnos() {
                         <td><KineSelector turno={t} kines={kines} onCambio={cambiarKine} /></td>
                         <td>{t.nroSesion ? t.nroSesion + '/' + (pac?.plan?.sesionesTotal || '?') : '—'}</td>
                         <td><PlanBadge p={pac} /></td>
-                        <td><AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} /></td>
+                        <td><AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} onEliminar={eliminarTurno} /></td>
                         <td>
                           <button className="btn bs bsm" style={{ fontSize: 11 }} onClick={() => navigate('/turnos/' + t.id + '/editar')}>Editar</button>
                         </td>

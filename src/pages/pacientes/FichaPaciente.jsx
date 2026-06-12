@@ -190,14 +190,14 @@ export default function FichaPaciente() {
   async function eliminarAsistencia(turno) {
     try {
       const batch = writeBatch(db)
-      batch.update(doc(db,'turnos',turno.id), { asistencia: 'pendiente', asistenciaTs: serverTimestamp() })
+      batch.delete(doc(db,'turnos',turno.id))
       const nuevasUsadas = Math.max(0, (pac.plan?.sesionesUsadas || 0) - 1)
       batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
       await batch.commit()
-      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, asistencia: 'pendiente' } : t))
+      setTurnos(prev => prev.filter(t => t.id !== turno.id))
       setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
       invalidarPacs()
-    } catch(err) { console.error(err); alert('Error al eliminar asistencia') }
+    } catch(err) { console.error(err); alert('Error al eliminar turno') }
   }
 
   async function cambiarKineTurno(turno, kineId) {
