@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc, collection, query, where, getDocs, orderBy, updateDoc, writeBatch, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, setDoc, collection, query, where, getDocs, orderBy, updateDoc, writeBatch, deleteDoc, addDoc, arrayUnion, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto } from '../../utils/helpers'
+
+// Agrega un movimiento de entrada a la caja del mes actual (crea el doc si no existe)
+async function agregarMovimientoCaja(mov) {
+  const mesStr = mesActual()
+  const cajaRef = doc(db, 'caja', 'caja_' + mesStr)
+  const cajaSnap = await getDoc(cajaRef)
+  if (cajaSnap.exists()) {
+    await updateDoc(cajaRef, { movimientos: arrayUnion(mov) })
+  } else {
+    await setDoc(cajaRef, { mes: mesStr, saldoInicial: 0, movimientos: [mov], creadoEn: serverTimestamp() })
+  }
+}
 
 function fmtFecha(s) {
   if (!s) return '—'
@@ -42,10 +54,68 @@ function ModalToken({ obraSocial, onConfirmar, onCancelar }) {
   )
 }
 
-function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
+// Modal de pago — para registrar sesión particular (pagó / debe) o para saldar una deuda existente
+function ModalPago({ soloPago, onConfirmar, onCancelar }) {
+  const [pago, setPago] = useState('si')
+  const [monto, setMonto] = useState('')
+  const [medioPago, setMedioPago] = useState('efectivo')
+
+  function confirmar() {
+    if (pago === 'si') {
+      if (!monto || parseFloat(monto) <= 0) return alert('Ingresá el monto')
+      onConfirmar({ pagado: true, monto: parseFloat(monto), medioPago })
+    } else {
+      onConfirmar({ pagado: false })
+    }
+  }
+
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div className="mt" style={{ marginBottom: 14 }}>{soloPago ? 'Registrar pago' : '¿Pagó la sesión?'}</div>
+        {!soloPago && (
+          <div className="row" style={{ gap: 10, marginBottom: 14 }}>
+            <button type="button" className={'btn ' + (pago === 'si' ? 'bp' : 'bs')} style={{ flex: 1 }} onClick={() => setPago('si')}>Sí, pagó</button>
+            <button type="button" className={'btn ' + (pago === 'no' ? 'bd' : 'bs')} style={{ flex: 1 }} onClick={() => setPago('no')}>No, queda debiendo</button>
+          </div>
+        )}
+        {pago === 'si' && (
+          <div className="fg" style={{ marginBottom: 14 }}>
+            <div className="ff">
+              <label>Monto *</label>
+              <input type="number" min="0" step="0.01" value={monto} onChange={e => setMonto(e.target.value)} placeholder="Ej: 8500" autoFocus />
+            </div>
+            <div className="ff">
+              <label>Medio de pago</label>
+              <select value={medioPago} onChange={e => setMedioPago(e.target.value)}>
+                <option value="efectivo">Efectivo</option>
+                <option value="transferencia">Transferencia</option>
+              </select>
+            </div>
+          </div>
+        )}
+        <div className="re">
+          <button type="button" className="btn bs" onClick={onCancelar}>Cancelar</button>
+          <button type="button" className="btn bp" onClick={confirmar}>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcarPagada }) {
   const [editandoKine, setEditandoKine] = useState(false)
   const [loadingK, setLoadingK] = useState(false)
   const [loadingE, setLoadingE] = useState(false)
+  const [modalLiquidar, setModalLiquidar] = useState(false)
+  const [liquidando, setLiquidando] = useState(false)
+
+  async function liquidar(pagoInfo) {
+    setModalLiquidar(false)
+    setLiquidando(true)
+    await onMarcarPagada(turno, pagoInfo)
+    setLiquidando(false)
+  }
 
   async function cambiarKine(kineId) {
     if (!kineId || kineId === turno.kinesiologoId) { setEditandoKine(false); return }
@@ -91,9 +161,20 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
         }
       </td>
       <td>
+        {modalLiquidar && (
+          <ModalPago soloPago onConfirmar={liquidar} onCancelar={() => setModalLiquidar(false)} />
+        )}
         {turno.asistencia === 'asistio' && (
-          <div className="row" style={{ gap: 4 }}>
+          <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
             <span className="badge bg">Asistió</span>
+            {turno.pagado === true && <span className="badge bg" title={turno.medioPago}>Pagó {turno.monto ? fmtMonto(turno.monto) : ''}</span>}
+            {turno.pagado === false && <span className="badge ba">Debe</span>}
+            {turno.pagado === false && (
+              <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px' }}
+                onClick={() => setModalLiquidar(true)} disabled={liquidando}>
+                {liquidando ? '...' : 'Marcar pagada'}
+              </button>
+            )}
             <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--ro)' }}
               onClick={eliminar} disabled={loadingE} title="Eliminar asistencia">✕</button>
           </div>
@@ -128,6 +209,7 @@ export default function FichaPaciente() {
   const [kineRefNombre, setKineRefNombre] = useState(null)
   const [modoRegistro, setModoRegistro] = useState('normal')
   const [fechaRegistro, setFechaRegistro] = useState(hoy())
+  const [modalPago, setModalPago] = useState(false)
 
   useEffect(() => {
     async function cargar() {
@@ -266,6 +348,86 @@ export default function FichaPaciente() {
     setRegistrando(false)
   }
 
+  // Paciente particular — abre el modal para elegir si pagó o queda debiendo
+  function intentarRegistrarParticular() {
+    if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    if (!fechaRegistro) return alert('Seleccioná una fecha')
+    setModalPago(true)
+  }
+
+  async function registrarSesionParticular(pagoInfo) {
+    setModalPago(false)
+    setRegistrando(true)
+    try {
+      const kine = kines.find(k => k.id === kineSelId)
+      const fechaStr = fechaRegistro || hoy()
+      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const nuevoRef = await addDoc(collection(db,'turnos'), {
+        fecha: fechaStr, hora: horaStr,
+        pacienteId: id,
+        pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
+        pacienteDni: pac.dni || '',
+        kinesiologoId: kineSelId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null,
+        asistencia: 'asistio', asistenciaTs: serverTimestamp(),
+        pagado: pagoInfo.pagado,
+        monto: pagoInfo.pagado ? pagoInfo.monto : null,
+        medioPago: pagoInfo.pagado ? pagoInfo.medioPago : null,
+        creadoPor: user.uid,
+        creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+        ts: serverTimestamp()
+      })
+      if (pagoInfo.pagado) {
+        await agregarMovimientoCaja({
+          tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
+          descripcion: `Sesión particular — ${pac.apellido} ${pac.nombre}`,
+          importe: pagoInfo.monto,
+          kineId: kineSelId,
+          profesionalNombre: kine.apellido + ' ' + kine.nombre,
+          cargadoPor: user.uid,
+          cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+          fecha: hoy(),
+          hora: horaStr
+        })
+      }
+      const nuevoT = {
+        id: nuevoRef.id, fecha: fechaStr, hora: horaStr,
+        kinesiologoId: kineSelId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null, asistencia: 'asistio',
+        pagado: pagoInfo.pagado, monto: pagoInfo.pagado ? pagoInfo.monto : null, medioPago: pagoInfo.pagado ? pagoInfo.medioPago : null
+      }
+      setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
+      setFechaRegistro(hoy())
+      setExito(true)
+      setTimeout(() => setExito(false), 3000)
+    } catch(err) { console.error(err); alert('Error al registrar') }
+    setRegistrando(false)
+  }
+
+  // Salda una sesión particular que había quedado marcada como "Debe"
+  async function marcarComoPagada(turno, pagoInfo) {
+    try {
+      const kine = kines.find(k => k.id === turno.kinesiologoId)
+      await updateDoc(doc(db,'turnos',turno.id), {
+        pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago
+      })
+      await agregarMovimientoCaja({
+        tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
+        descripcion: `Sesión particular — ${pac.apellido} ${pac.nombre}`,
+        importe: pagoInfo.monto,
+        kineId: turno.kinesiologoId || null,
+        profesionalNombre: kine ? kine.apellido + ' ' + kine.nombre : turno.kinesiologoNombre,
+        cargadoPor: user.uid,
+        cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+        fecha: hoy(),
+        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      })
+      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago } : t))
+    } catch(err) { console.error(err); alert('Error al registrar el pago') }
+  }
+
   async function eliminarAsistencia(turno) {
     try {
       const batch = writeBatch(db)
@@ -323,6 +485,9 @@ export default function FichaPaciente() {
   const conToken = necesitaToken(pac.obraSocial)
   const sinAutorizarCount = turnos.filter(t => t.autorizado === false).length
   const excedido = plan && (plan.sesionesUsadas || 0) > plan.sesionesTotal
+  const esParticular = pac.modalidad === 'particular'
+  const sesionesAdeudadas = turnos.filter(t => t.pagado === false)
+  const totalAdeudado = sesionesAdeudadas.reduce((a,t) => a + (t.monto||0), 0)
 
   return (
     <div>
@@ -332,6 +497,9 @@ export default function FichaPaciente() {
           onConfirmar={() => modoRegistro === 'sinAutorizacion' ? registrarSesionSinAutorizacion() : registrarSesion()}
           onCancelar={() => setModalToken(false)}
         />
+      )}
+      {modalPago && (
+        <ModalPago onConfirmar={registrarSesionParticular} onCancelar={() => setModalPago(false)} />
       )}
 
       <div className="row" style={{ marginBottom: 20 }}>
@@ -384,8 +552,16 @@ export default function FichaPaciente() {
         </div>
 
         <div className="card">
-          <div className="card-title">Estado del plan</div>
-          {!plan ? (
+          <div className="card-title">{esParticular ? 'Cuenta corriente' : 'Estado del plan'}</div>
+          {esParticular ? (
+            sesionesAdeudadas.length === 0 ? (
+              <div style={{ color:'#888', fontSize:13 }}>Sin sesiones adeudadas.</div>
+            ) : (
+              <div className="al alr" style={{ marginBottom:0 }}>
+                ⚠ {sesionesAdeudadas.length} sesión{sesionesAdeudadas.length>1?'es':''} adeudada{sesionesAdeudadas.length>1?'s':''} — {fmtMonto(totalAdeudado)}
+              </div>
+            )
+          ) : !plan ? (
             <div style={{ color:'#888', fontSize:13 }}>
               Sin plan cargado.{' '}
               <button className="btn bs bsm" onClick={() => navigate(`/pacientes/${id}/editar`)}>Cargar plan</button>
@@ -425,8 +601,31 @@ export default function FichaPaciente() {
         </div>
       </div>
 
+      {/* Registro sesión — paciente particular (paga por sesión) */}
+      {!arch && esParticular && (
+        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
+          <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
+          <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
+            Paciente particular — al confirmar te pregunta si pagó (se carga solo en Caja) o si queda debiendo.
+          </div>
+          <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
+            <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
+            <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
+              <option value="">Seleccioná kinesiológo...</option>
+              {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+            </select>
+            <button className="btn bp" onClick={intentarRegistrarParticular} disabled={registrando || !kineSelId || !fechaRegistro} style={{ minWidth:160 }}>
+              {registrando ? 'Registrando...' : '✓ Marcar asistencia'}
+            </button>
+            {exito && <div className="badge bg" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada</div>}
+          </div>
+        </div>
+      )}
+
       {/* Registro sin autorización — paciente sin plan cargado todavía */}
-      {!arch && !plan && (
+      {!arch && !esParticular && !plan && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--ro)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión sin autorización</div>
           <div style={{ fontSize:13, color:'#666', marginBottom:10 }}>
@@ -449,7 +648,7 @@ export default function FichaPaciente() {
       )}
 
       {/* Registro rápido */}
-      {!arch && plan && est !== 'vencido' && (
+      {!arch && !esParticular && plan && est !== 'vencido' && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
@@ -493,7 +692,8 @@ export default function FichaPaciente() {
                 {turnos.map(t => (
                   <FilaTurno key={t.id} turno={t} kines={kines}
                     onEliminarAsistencia={eliminarAsistencia}
-                    onCambiarKine={cambiarKineTurno} />
+                    onCambiarKine={cambiarKineTurno}
+                    onMarcarPagada={marcarComoPagada} />
                 ))}
               </tbody>
             </table>
