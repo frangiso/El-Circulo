@@ -19,6 +19,7 @@ service cloud.firestore {
     match /pacientes/{id}    { allow read, write: if isActive(); }
     match /turnos/{id}       { allow read, write: if isActive(); }
     match /caja/{id}         { allow read, write: if isActive(); }
+    match /senas/{id}        { allow read, write: if isActive(); }
     match /kinesiologos/{id} { allow read, write: if isActive(); }
     match /logs/{id}      { allow read, create: if isActive(); }
     match /obrasSociales/{id} { allow read, write: if isActive(); }
