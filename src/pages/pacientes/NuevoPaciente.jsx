@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
 import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE } from '../../utils/helpers'
 
-const INIT = { nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'' }
+const INIT = { nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
 // Busca duplicados SOLO por DNI — pueden existir pacientes con el mismo nombre
 async function buscarDuplicado(nombre, apellido, dni, idExcluir) {
@@ -114,6 +114,23 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
       </div>
 
       <div className="card">
+        <div className="card-title">Orden médica</div>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
+          Se guarda como una orden nueva en el historial del paciente. Dejalo vacío si no hay una orden nueva para cargar ahora.
+        </div>
+        <div className="fg">
+          <div className="ff">
+            <label>Fecha de entrega de la orden</label>
+            <input type="date" value={f.ordenFecha} onChange={e => set('ordenFecha', e.target.value)} />
+          </div>
+          <div className="ff full">
+            <label>Detalle de la orden</label>
+            <input value={f.ordenDetalle} onChange={e => set('ordenDetalle', e.target.value)} placeholder="Ej: 10 sesiones kinesiología — cervical" />
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
         <div className="card-title">
           Plan de sesiones{' '}
           {eraArch && <span style={{ color: 'var(--na)', fontSize: 12, fontWeight: 400 }}>(cargá uno nuevo para reactivar)</span>}
@@ -181,13 +198,19 @@ export function NuevoPaciente() {
         fechaInicio: f.fechaInicio || null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef || null
       } : null
-      await addDoc(collection(db,'pacientes'), {
+      const pacRef = await addDoc(collection(db,'pacientes'), {
         nombre: f.nombre.trim(), apellido: f.apellido.trim(),
         dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
         plan, archivado: false, creadoPor: user.uid, creadoEn: serverTimestamp()
       })
+      if (f.ordenFecha) {
+        await addDoc(collection(db,'ordenes'), {
+          pacienteId: pacRef.id, fecha: f.ordenFecha, detalle: f.ordenDetalle.trim(),
+          creadoPor: user.uid, creadoPorNombre: `${perfil.apellido} ${perfil.nombre}`, ts: serverTimestamp()
+        })
+      }
       invalidarPacs()
       await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Nuevo paciente', `${f.apellido} ${f.nombre}`)
       navigate('/pacientes')
@@ -225,7 +248,8 @@ export function EditarPaciente() {
         obraSocial: d.obraSocial||'', nroAfiliado: d.nroAfiliado||'',
         diagnostico: d.diagnostico||'', observaciones: d.observaciones||'',
         sesionesTotal: d.plan?.sesionesTotal||'', sesionesUsadas: d.plan?.sesionesUsadas||0,
-        fechaInicio: d.plan?.fechaInicio||'', kinesiologoRef: d.plan?.kinesiologoRef||''
+        fechaInicio: d.plan?.fechaInicio||'', kinesiologoRef: d.plan?.kinesiologoRef||'',
+        ordenFecha: '', ordenDetalle: ''
       })
     })
   }, [id])
@@ -271,6 +295,13 @@ export function EditarPaciente() {
         batch.update(doc(db,'turnos',t.id), { autorizado: true, nroSesion: numero })
       })
       await batch.commit()
+
+      if (f.ordenFecha) {
+        await addDoc(collection(db,'ordenes'), {
+          pacienteId: id, fecha: f.ordenFecha, detalle: f.ordenDetalle.trim(),
+          creadoPor: user.uid, creadoPorNombre: `${perfil.apellido} ${perfil.nombre}`, ts: serverTimestamp()
+        })
+      }
 
       invalidarPacs()
       const acc = eraArch && nuevoEst !== 'vencido' ? 'Reactivó paciente' : 'Edición paciente'

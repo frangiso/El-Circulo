@@ -127,13 +127,15 @@ export default function FichaPaciente() {
   const [eliminando, setEliminando] = useState(false)
   const [kineRefNombre, setKineRefNombre] = useState(null)
   const [modoRegistro, setModoRegistro] = useState('normal')
+  const [ordenes, setOrdenes] = useState([])
 
   useEffect(() => {
     async function cargar() {
-      const [snap, k, tsSnap] = await Promise.all([
+      const [snap, k, tsSnap, ordSnap] = await Promise.all([
         getDoc(doc(db,'pacientes',id)),
         getKines(),
-        getDocs(query(collection(db,'turnos'), where('pacienteId','==',id), orderBy('fecha','desc')))
+        getDocs(query(collection(db,'turnos'), where('pacienteId','==',id), orderBy('fecha','desc'))),
+        getDocs(query(collection(db,'ordenes'), where('pacienteId','==',id)))
       ])
       if (!snap.exists()) { navigate('/pacientes'); return }
       const p = { id: snap.id, ...snap.data() }
@@ -143,6 +145,7 @@ export default function FichaPaciente() {
       }
       setPac(p); setKines(k)
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setOrdenes(ordSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
 
       const refId = p.plan?.kinesiologoRef
       if (refId) {
@@ -411,6 +414,32 @@ export default function FichaPaciente() {
               </table>
             </>
           )}
+        </div>
+      </div>
+
+      {/* Historial de órdenes médicas */}
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="card-title">Historial de órdenes ({ordenes.length})</div>
+        {ordenes.length === 0 ? (
+          <div className="emt">Sin órdenes registradas</div>
+        ) : (
+          <div className="tw">
+            <table>
+              <thead><tr><th>Fecha de entrega</th><th>Detalle</th><th>Cargada por</th></tr></thead>
+              <tbody>
+                {ordenes.map(o => (
+                  <tr key={o.id}>
+                    <td className="fw6">{fmtFecha(o.fecha)}</td>
+                    <td>{o.detalle || '—'}</td>
+                    <td style={{ color:'#888', fontSize:12 }}>{o.creadoPorNombre || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div style={{ fontSize:12, color:'#888', marginTop:10 }}>
+          Para cargar una orden nueva, andá a "Editar" y completá los campos de "Orden médica".
         </div>
       </div>
 
