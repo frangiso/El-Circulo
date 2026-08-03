@@ -64,6 +64,16 @@ export default function Kinesiologos() {
     cargar()
   }
 
+  async function eliminar(k) {
+    if (!window.confirm(`¿Eliminar a ${k.apellido} ${k.nombre}? Esta acción no se puede deshacer.`)) return
+    try {
+      await deleteDoc(doc(db, 'kinesiologos', k.id))
+      await escribirLog(user.uid, perfil.apellido+' '+perfil.nombre, 'Eliminó kinesiológo', k.apellido+' '+k.nombre)
+      invalidarUsers()
+      cargar()
+    } catch (err) { console.error(err); alert('Error al eliminar') }
+  }
+
   const activos   = kines.filter(k => k.activo !== false)
   const inactivos = kines.filter(k => k.activo === false)
 
@@ -92,6 +102,7 @@ export default function Kinesiologos() {
                     <div className="row">
                       <button className="btn bs bsm" onClick={() => abrirEditar(k)}>Editar</button>
                       <button className="btn bd bsm" onClick={() => toggleActivo(k)}>Desactivar</button>
+                      <button className="btn bd bsm" onClick={() => eliminar(k)}>Eliminar</button>
                     </div>
                   </td>
                 </tr>
@@ -112,7 +123,12 @@ export default function Kinesiologos() {
                   <tr key={k.id} style={{ opacity: 0.6 }}>
                     <td>{k.apellido} {k.nombre}</td>
                     <td>{k.especialidad || '—'}</td>
-                    <td><button className="btn bsuc bsm" onClick={() => toggleActivo(k)}>Activar</button></td>
+                    <td>
+                      <div className="row">
+                        <button className="btn bsuc bsm" onClick={() => toggleActivo(k)}>Activar</button>
+                        <button className="btn bd bsm" onClick={() => eliminar(k)}>Eliminar</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

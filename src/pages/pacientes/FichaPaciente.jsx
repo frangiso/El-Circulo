@@ -120,6 +120,7 @@ export default function FichaPaciente() {
   const [exito, setExito]         = useState(false)
   const [modalToken, setModalToken] = useState(false)
   const [eliminando, setEliminando] = useState(false)
+  const [kineRefNombre, setKineRefNombre] = useState(null)
 
   useEffect(() => {
     async function cargar() {
@@ -137,6 +138,16 @@ export default function FichaPaciente() {
       setPac(p); setKines(k)
       if (k.length > 0) setKineSelId(k[0].id)
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
+
+      const refId = p.plan?.kinesiologoRef
+      if (refId) {
+        const enCache = k.find(x => x.id === refId)
+        if (enCache) setKineRefNombre(`${enCache.apellido} ${enCache.nombre}`)
+        else {
+          const rSnap = await getDoc(doc(db,'kinesiologos',refId))
+          setKineRefNombre(rSnap.exists() ? `${rSnap.data().apellido} ${rSnap.data().nombre}` : null)
+        }
+      }
       setCarg(false)
     }
     cargar()
@@ -325,6 +336,7 @@ export default function FichaPaciente() {
                 <tbody>
                   <tr><td style={{ color:'#888', padding:'4px 0', width:'40%' }}>Inicio</td><td style={{ padding:'4px 0' }}>{fmtFecha(plan.fechaInicio)}</td></tr>
                   <tr><td style={{ color:'#888', padding:'4px 0' }}>Vencimiento</td><td style={{ padding:'4px 0' }}>{fmtFecha(plan.fechaVencimiento)}</td></tr>
+                  <tr><td style={{ color:'#888', padding:'4px 0' }}>Kinesiológo referente</td><td style={{ padding:'4px 0' }}>{kineRefNombre || '—'}</td></tr>
                   <tr><td style={{ color:'#888', padding:'4px 0' }}>Estado</td><td style={{ padding:'4px 0' }}>
                     {est==='vencido'&&<span className="badge br">Vencido</span>}
                     {est==='por-vencer'&&<span className="badge ba">Por vencer</span>}

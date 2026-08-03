@@ -9,11 +9,17 @@ service cloud.firestore {
     match /usuarios/{uid} {
       allow read: if isActive();
       allow create: if isAuth();
-      allow update: if isDueno() || request.auth.uid == uid;
+      // Un usuario puede editar su propio documento, pero no puede tocar
+      // su propio rol ni estado — eso solo lo puede hacer el dueño.
+      allow update: if isDueno() ||
+        (request.auth.uid == uid &&
+         request.resource.data.rol == resource.data.rol &&
+         request.resource.data.estado == resource.data.estado);
     }
-    match /pacientes/{id} { allow read, write: if isActive(); }
-    match /turnos/{id}    { allow read, write: if isActive(); }
-    match /caja/{id}      { allow read, write: if isActive(); }
+    match /pacientes/{id}    { allow read, write: if isActive(); }
+    match /turnos/{id}       { allow read, write: if isActive(); }
+    match /caja/{id}         { allow read, write: if isActive(); }
+    match /kinesiologos/{id} { allow read, write: if isActive(); }
     match /logs/{id}      { allow read, create: if isActive(); }
     match /obrasSociales/{id} { allow read, write: if isActive(); }
 
