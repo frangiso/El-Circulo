@@ -136,7 +136,6 @@ export default function FichaPaciente() {
         p.archivado = true; invalidarPacs()
       }
       setPac(p); setKines(k)
-      if (k.length > 0) setKineSelId(k[0].id)
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
 
       const refId = p.plan?.kinesiologoRef
@@ -148,6 +147,9 @@ export default function FichaPaciente() {
           setKineRefNombre(rSnap.exists() ? `${rSnap.data().apellido} ${rSnap.data().nombre}` : null)
         }
       }
+      // Preseleccionar el kinesiológo referente del plan; si no está activo o no hay, el primero de la lista
+      if (refId && k.some(x => x.id === refId)) setKineSelId(refId)
+      else if (k.length > 0) setKineSelId(k[0].id)
       setCarg(false)
     }
     cargar()
