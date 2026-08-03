@@ -127,6 +127,7 @@ export default function FichaPaciente() {
   const [eliminando, setEliminando] = useState(false)
   const [kineRefNombre, setKineRefNombre] = useState(null)
   const [modoRegistro, setModoRegistro] = useState('normal')
+  const [fechaRegistro, setFechaRegistro] = useState(hoy())
 
   useEffect(() => {
     async function cargar() {
@@ -164,6 +165,7 @@ export default function FichaPaciente() {
   // Intento de registrar sesión — verifica si necesita token primero
   function intentarRegistrar() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    if (!fechaRegistro) return alert('Seleccioná una fecha')
     setModoRegistro('normal')
     if (necesitaToken(pac.obraSocial)) {
       setModalToken(true) // mostrar recordatorio
@@ -175,6 +177,7 @@ export default function FichaPaciente() {
   // Registro de asistencia sin sesiones autorizadas todavía — requiere confirmación explícita
   function intentarRegistrarSinAutorizacion() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    if (!fechaRegistro) return alert('Seleccioná una fecha')
     if (!window.confirm('Este paciente todavía no tiene sesiones autorizadas. ¿Registrar la asistencia igual como NO AUTORIZADA? Se descontará del plan apenas se cargue la autorización.')) return
     setModoRegistro('sinAutorizacion')
     if (necesitaToken(pac.obraSocial)) {
@@ -189,12 +192,12 @@ export default function FichaPaciente() {
     setRegistrando(true)
     try {
       const kine = kines.find(k => k.id === kineSelId)
-      const hoyStr = hoy()
+      const fechaStr = fechaRegistro || hoy()
       const nuevasUsadas = (pac.plan?.sesionesUsadas || 0) + 1
       const batch = writeBatch(db)
       const turnoRef = doc(collection(db,'turnos'))
       batch.set(turnoRef, {
-        fecha: hoyStr,
+        fecha: fechaStr,
         hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
         pacienteId: id,
         pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
@@ -210,15 +213,16 @@ export default function FichaPaciente() {
       batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
       await batch.commit()
       const nuevoT = {
-        id: turnoRef.id, fecha: hoyStr,
+        id: turnoRef.id, fecha: fechaStr,
         hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: nuevasUsadas, asistencia: 'asistio'
       }
-      setTurnos(prev => [nuevoT, ...prev])
+      setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
       setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
       invalidarPacs()
+      setFechaRegistro(hoy())
       setExito(true)
       setTimeout(() => setExito(false), 3000)
     } catch(err) { console.error(err); alert('Error al registrar') }
@@ -231,9 +235,9 @@ export default function FichaPaciente() {
     setRegistrando(true)
     try {
       const kine = kines.find(k => k.id === kineSelId)
-      const hoyStr = hoy()
+      const fechaStr = fechaRegistro || hoy()
       const nuevoRef = await addDoc(collection(db,'turnos'), {
-        fecha: hoyStr,
+        fecha: fechaStr,
         hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
         pacienteId: id,
         pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
@@ -248,13 +252,14 @@ export default function FichaPaciente() {
         ts: serverTimestamp()
       })
       const nuevoT = {
-        id: nuevoRef.id, fecha: hoyStr,
+        id: nuevoRef.id, fecha: fechaStr,
         hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: null, autorizado: false, asistencia: 'asistio'
       }
-      setTurnos(prev => [nuevoT, ...prev])
+      setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
+      setFechaRegistro(hoy())
       setExito(true)
       setTimeout(() => setExito(false), 3000)
     } catch(err) { console.error(err); alert('Error al registrar') }
@@ -428,12 +433,14 @@ export default function FichaPaciente() {
             Este paciente todavía no tiene sesiones autorizadas. Podés registrar que asistió igual — queda marcado en <strong style={{ color:'var(--ro)' }}>rojo</strong> como no autorizado, y se descuenta automáticamente del plan cuando se cargue la autorización.
           </div>
           <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
+            <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
             <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
               style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
               <option value="">Seleccioná kinesiológo...</option>
               {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
             </select>
-            <button className="btn bd" onClick={intentarRegistrarSinAutorizacion} disabled={registrando || !kineSelId} style={{ minWidth:220 }}>
+            <button className="btn bd" onClick={intentarRegistrarSinAutorizacion} disabled={registrando || !kineSelId || !fechaRegistro} style={{ minWidth:220 }}>
               {registrando ? 'Registrando...' : '⚠ Registrar sin autorización'}
             </button>
             {exito && <div className="badge br" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada sin autorización</div>}
@@ -444,17 +451,22 @@ export default function FichaPaciente() {
       {/* Registro rápido */}
       {!arch && plan && est !== 'vencido' && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
-          <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión de hoy</div>
+          <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
+          <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
+            Por defecto es hoy — elegí una fecha anterior si es una sesión que se pasó por alto cargar.
+          </div>
           {sesRestantes !== null && sesRestantes <= 0 ? (
             <div className="al alr" style={{ marginBottom: 0 }}>No quedan sesiones disponibles en el plan actual.</div>
           ) : (
             <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
+              <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
+                style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
               <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
                 style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
                 <option value="">Seleccioná kinesiológo...</option>
                 {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
               </select>
-              <button className="btn bp" onClick={intentarRegistrar} disabled={registrando || !kineSelId} style={{ minWidth:160 }}>
+              <button className="btn bp" onClick={intentarRegistrar} disabled={registrando || !kineSelId || !fechaRegistro} style={{ minWidth:160 }}>
                 {registrando ? 'Registrando...' : conToken ? '🔑 ✓ Marcar asistencia' : '✓ Marcar asistencia'}
               </button>
               {exito && <div className="badge bg" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada — quedan {sesRestantes - 1} sesiones</div>}
