@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, addDoc, doc, getDoc, updateDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore'
+import { collection, addDoc, doc, getDoc, updateDoc, writeBatch, serverTimestamp, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
@@ -237,21 +237,48 @@ export function EditarPaciente() {
         await addDoc(collection(db,'obrasSociales'), { nombre: f.obraSocial }); invalidarObras()
       }
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
+
+      // Si se está cargando un plan, las sesiones ya registradas sin autorización
+      // se descuentan del total (quedan marcadas como autorizadas y numeradas)
+      let sesionesUsadas = parseInt(f.sesionesUsadas)||0
+      let pendientes = []
+      if (f.sesionesTotal) {
+        const pendSnap = await getDocs(query(
+          collection(db,'turnos'), where('pacienteId','==',id), where('autorizado','==',false)
+        ))
+        pendientes = pendSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
+        sesionesUsadas += pendientes.length
+      }
+
       const plan = f.sesionesTotal ? {
-        sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas: parseInt(f.sesionesUsadas)||0,
+        sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas,
         fechaInicio: f.fechaInicio||null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef||null
       } : null
       const nuevoEst = plan ? estadoPlan(plan) : 'sin-plan'
-      await updateDoc(doc(db,'pacientes',id), {
+
+      const batch = writeBatch(db)
+      batch.update(doc(db,'pacientes',id), {
         nombre: f.nombre.trim(), apellido: f.apellido.trim(), dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
         plan, archivado: nuevoEst === 'vencido', actualizadoEn: serverTimestamp()
       })
+      let numero = parseInt(f.sesionesUsadas)||0
+      pendientes.forEach(t => {
+        numero++
+        batch.update(doc(db,'turnos',t.id), { autorizado: true, nroSesion: numero })
+      })
+      await batch.commit()
+
       invalidarPacs()
       const acc = eraArch && nuevoEst !== 'vencido' ? 'Reactivó paciente' : 'Edición paciente'
       await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, acc, `${f.apellido} ${f.nombre}`)
+      if (pendientes.length > 0) {
+        await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Autorizó sesiones pendientes',
+          `${pendientes.length} sesión${pendientes.length>1?'es':''} de ${f.apellido} ${f.nombre}`)
+      }
       navigate(`/pacientes/${id}`)
     } catch(err) { console.error(err); alert('Error al guardar') }
     setSaving(false)

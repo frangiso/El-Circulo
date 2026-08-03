@@ -77,7 +77,7 @@ function AsistenciaBtn({ turno, onCambio, onEliminar }) {
   async function eliminar() { if (loading) return; setLoading(true); await onEliminar(turno); setLoading(false) }
   if (est === 'asistio') return (
     <div className="row" style={{ gap: 4 }}>
-      <span className="badge bg">Asistió</span>
+      <span className={turno.autorizado === false ? 'badge br' : 'badge bg'}>{turno.autorizado === false ? 'Sin autorizar' : 'Asistió'}</span>
       <button className="btn bs bsm" style={{ fontSize: 11, padding: '3px 7px' }} onClick={eliminar} disabled={loading}>✕</button>
     </div>
   )
@@ -199,7 +199,10 @@ export default function Turnos() {
     try {
       const pac = mapaP[turno.pacienteId]
       const batch = writeBatch(db)
-      batch.update(doc(db,'turnos',turno.id), { asistencia: nuevoEst, asistenciaTs: serverTimestamp() })
+      // Sin plan cargado: la sesión queda marcada como no autorizada (se descuenta al cargar el plan)
+      const turnoData = { asistencia: nuevoEst, asistenciaTs: serverTimestamp() }
+      if (!pac?.plan) turnoData.autorizado = nuevoEst === 'asistio' ? false : null
+      batch.update(doc(db,'turnos',turno.id), turnoData)
       if (nuevoEst === 'asistio' && pac?.plan) {
         const n = (pac.plan.sesionesUsadas || 0) + 1
         batch.update(doc(db,'pacientes',turno.pacienteId), { 'plan.sesionesUsadas': n })
@@ -215,7 +218,10 @@ export default function Turnos() {
       } else {
         await batch.commit()
       }
-      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, asistencia: nuevoEst } : t))
+      setTurnos(prev => prev.map(t => t.id === turno.id
+        ? { ...t, asistencia: nuevoEst, ...(!pac?.plan ? { autorizado: nuevoEst === 'asistio' ? false : null } : {}) }
+        : t
+      ))
     } catch(err) { console.error(err); alert('Error al actualizar') }
   }
 
@@ -320,6 +326,7 @@ export default function Turnos() {
                                 </div>
                                 {estP === 'vencido' && <div style={{ fontSize: 10, color: 'var(--ro)' }}>⚠ Vencido</div>}
                                 {estP === 'por-vencer' && <div style={{ fontSize: 10, color: 'var(--na)' }}>⚠ {diasHabilesRestantes(pac.plan.fechaVencimiento)}d</div>}
+                                {t.autorizado === false && <div style={{ fontSize: 10, color: 'var(--ro)' }}>⚠ Sin autorizar</div>}
                                 <div style={{ marginTop: 3 }}>
                                   <AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} onEliminar={eliminarTurno} />
                                 </div>
@@ -387,7 +394,7 @@ export default function Turnos() {
                     const pac = mapaP[t.pacienteId]
                     const estP = pac?.plan ? estadoPlan(pac.plan) : null
                     return (
-                      <tr key={t.id} style={{ background: estP === 'vencido' ? '#fff8f8' : estP === 'por-vencer' ? '#fffbf0' : 'inherit' }}>
+                      <tr key={t.id} style={{ background: t.autorizado === false ? '#fff5f5' : estP === 'vencido' ? '#fff8f8' : estP === 'por-vencer' ? '#fffbf0' : 'inherit' }}>
                         <td className="fw6">{t.hora}</td>
                         <td>
                           <div style={{ cursor: 'pointer', color: 'var(--az)' }} onClick={() => navigate('/pacientes/' + t.pacienteId)}>
@@ -399,7 +406,12 @@ export default function Turnos() {
                         </td>
                         <td>{t.obraSocial ? <span className="badge bb">{t.obraSocial}</span> : '—'}</td>
                         <td><KineSelector turno={t} kines={kines} onCambio={cambiarKine} /></td>
-                        <td>{t.nroSesion ? t.nroSesion + '/' + (pac?.plan?.sesionesTotal || '?') : '—'}</td>
+                        <td>
+                          {t.autorizado === false
+                            ? <span className="badge br" style={{ fontSize: 10 }}>Sin autorizar</span>
+                            : (t.nroSesion ? t.nroSesion + '/' + (pac?.plan?.sesionesTotal || '?') : '—')
+                          }
+                        </td>
                         <td><PlanBadge p={pac} /></td>
                         <td><AsistenciaBtn turno={t} onCambio={intentarCambiarAsistencia} onEliminar={eliminarTurno} /></td>
                         <td>
