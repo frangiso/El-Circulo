@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
 import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE } from '../../utils/helpers'
 
-const INIT = { nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
+const INIT = { modalidad:'obraSocial', nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
 // Busca duplicados SOLO por DNI — pueden existir pacientes con el mismo nombre
 async function buscarDuplicado(nombre, apellido, dni, idExcluir) {
@@ -65,6 +65,24 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
           </button>
         </div>
       )}
+
+      <div className="card">
+        <div className="card-title">Modalidad</div>
+        <div className="fg">
+          <div className="ff full">
+            <label>¿Cómo abona el paciente?</label>
+            <select value={f.modalidad} onChange={e => set('modalidad', e.target.value)}>
+              <option value="obraSocial">Obra social — plan de sesiones autorizadas</option>
+              <option value="particular">Particular — paga sesión por sesión</option>
+            </select>
+            <span className="hint">
+              {f.modalidad === 'particular'
+                ? 'No tiene plan ni vencimiento. Cada sesión se marca como pagada o adeudada desde la ficha.'
+                : 'Usa el plan de sesiones autorizadas y vencimiento a 45 días hábiles, como siempre.'}
+            </span>
+          </div>
+        </div>
+      </div>
 
       <div className="card">
         <div className="card-title">Datos personales</div>
@@ -130,36 +148,38 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title">
-          Plan de sesiones{' '}
-          {eraArch && <span style={{ color: 'var(--na)', fontSize: 12, fontWeight: 400 }}>(cargá uno nuevo para reactivar)</span>}
-        </div>
-        <div className="fg">
-          <div className="ff">
-            <label>Total sesiones autorizadas</label>
-            <input type="number" min="1" value={f.sesionesTotal} onChange={e => set('sesionesTotal', e.target.value)} />
+      {f.modalidad !== 'particular' && (
+        <div className="card">
+          <div className="card-title">
+            Plan de sesiones{' '}
+            {eraArch && <span style={{ color: 'var(--na)', fontSize: 12, fontWeight: 400 }}>(cargá uno nuevo para reactivar)</span>}
           </div>
-          {eraArch && (
+          <div className="fg">
             <div className="ff">
-              <label>Sesiones ya realizadas</label>
-              <input type="number" min="0" value={f.sesionesUsadas} onChange={e => set('sesionesUsadas', e.target.value)} />
+              <label>Total sesiones autorizadas</label>
+              <input type="number" min="1" value={f.sesionesTotal} onChange={e => set('sesionesTotal', e.target.value)} />
             </div>
-          )}
-          <div className="ff">
-            <label>Fecha de inicio del plan</label>
-            <input type="date" value={f.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
+            {eraArch && (
+              <div className="ff">
+                <label>Sesiones ya realizadas</label>
+                <input type="number" min="0" value={f.sesionesUsadas} onChange={e => set('sesionesUsadas', e.target.value)} />
+              </div>
+            )}
+            <div className="ff">
+              <label>Fecha de inicio del plan</label>
+              <input type="date" value={f.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
+            </div>
+            <div className="ff full">
+              <label>Kinesiológo referente</label>
+              <select value={f.kinesiologoRef} onChange={e => set('kinesiologoRef', e.target.value)}>
+                <option value="">Sin asignar</option>
+                {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="ff full">
-            <label>Kinesiológo referente</label>
-            <select value={f.kinesiologoRef} onChange={e => set('kinesiologoRef', e.target.value)}>
-              <option value="">Sin asignar</option>
-              {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
-            </select>
-          </div>
+          {venc && <div className="al alb" style={{ marginTop: 10, marginBottom: 0 }}>Vencimiento calculado: {venc} (45 días hábiles)</div>}
         </div>
-        {venc && <div className="al alb" style={{ marginTop: 10, marginBottom: 0 }}>Vencimiento calculado: {venc} (45 días hábiles)</div>}
-      </div>
+      )}
 
       <div className="card">
         <div className="card-title">Observaciones</div>
@@ -192,13 +212,15 @@ export function NuevoPaciente() {
         await addDoc(collection(db,'obrasSociales'), { nombre: f.obraSocial })
         invalidarObras()
       }
+      const esParticular = f.modalidad === 'particular'
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
-      const plan = f.sesionesTotal ? {
+      const plan = (!esParticular && f.sesionesTotal) ? {
         sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas: 0,
         fechaInicio: f.fechaInicio || null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef || null
       } : null
       await addDoc(collection(db,'pacientes'), {
+        modalidad: f.modalidad,
         nombre: f.nombre.trim(), apellido: f.apellido.trim(),
         dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
@@ -241,6 +263,7 @@ export function EditarPaciente() {
       const d = s.data(); setEraArch(d.archivado === true)
       setPlanAnterior(d.plan || null)
       setInicial({
+        modalidad: d.modalidad||'obraSocial',
         nombre: d.nombre||'', apellido: d.apellido||'', dni: d.dni||'', telefono: d.telefono||'',
         obraSocial: d.obraSocial||'', nroAfiliado: d.nroAfiliado||'',
         diagnostico: d.diagnostico||'', observaciones: d.observaciones||'',
@@ -257,13 +280,14 @@ export function EditarPaciente() {
       if (f.obraSocial && !OBRAS_BASE.includes(f.obraSocial)) {
         await addDoc(collection(db,'obrasSociales'), { nombre: f.obraSocial }); invalidarObras()
       }
+      const esParticular = f.modalidad === 'particular'
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
 
       // Si se está cargando un plan, las sesiones ya registradas sin autorización
       // se descuentan del total (quedan marcadas como autorizadas y numeradas)
       let sesionesUsadas = parseInt(f.sesionesUsadas)||0
       let pendientes = []
-      if (f.sesionesTotal) {
+      if (!esParticular && f.sesionesTotal) {
         const pendSnap = await getDocs(query(
           collection(db,'turnos'), where('pacienteId','==',id), where('autorizado','==',false)
         ))
@@ -273,10 +297,12 @@ export function EditarPaciente() {
       }
 
       // Si se está dando de baja el plan que había (se vació "Total sesiones
-      // autorizadas"), las sesiones que se hicieron bajo ese plan vuelven a
-      // quedar sin autorizar, para descontarlas de nuevo cuando llegue la orden real
+      // autorizadas", siguiendo en modalidad obra social), las sesiones que se
+      // hicieron bajo ese plan vuelven a quedar sin autorizar, para descontarlas
+      // de nuevo cuando llegue la orden real. Si el paciente pasa a particular,
+      // el historial previo no se toca — el concepto de "autorizado" ya no aplica.
       let revertidas = []
-      if (!f.sesionesTotal && planAnterior) {
+      if (!esParticular && !f.sesionesTotal && planAnterior) {
         const tSnap = await getDocs(query(collection(db,'turnos'), where('pacienteId','==',id)))
         revertidas = tSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t =>
           t.asistencia === 'asistio' && t.autorizado !== false &&
@@ -284,7 +310,7 @@ export function EditarPaciente() {
         )
       }
 
-      const plan = f.sesionesTotal ? {
+      const plan = (!esParticular && f.sesionesTotal) ? {
         sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas,
         fechaInicio: f.fechaInicio||null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef||null
@@ -293,6 +319,7 @@ export function EditarPaciente() {
 
       const batch = writeBatch(db)
       batch.update(doc(db,'pacientes',id), {
+        modalidad: f.modalidad,
         nombre: f.nombre.trim(), apellido: f.apellido.trim(), dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),

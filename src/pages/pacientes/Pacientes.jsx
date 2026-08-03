@@ -11,6 +11,7 @@ const ILupa = () => (
 )
 
 function PlanBadge({ p }) {
+  if (p?.modalidad === 'particular') return <span className="badge bb">Particular</span>
   if (!p || !p.plan) return <span className="badge bk">Sin plan</span>
   const e = estadoPlan(p.plan)
   if (e === 'vencido') return <span className="badge br">Vencido</span>
