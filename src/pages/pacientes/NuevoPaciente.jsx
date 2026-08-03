@@ -233,11 +233,13 @@ export function EditarPaciente() {
   const [inicial, setInicial] = useState(null)
   const [eraArch, setEraArch] = useState(false)
   const [saving, setSaving]   = useState(false)
+  const [planAnterior, setPlanAnterior] = useState(null)
 
   useEffect(() => {
     getDoc(doc(db,'pacientes',id)).then(s => {
       if (!s.exists()) { navigate('/pacientes'); return }
       const d = s.data(); setEraArch(d.archivado === true)
+      setPlanAnterior(d.plan || null)
       setInicial({
         nombre: d.nombre||'', apellido: d.apellido||'', dni: d.dni||'', telefono: d.telefono||'',
         obraSocial: d.obraSocial||'', nroAfiliado: d.nroAfiliado||'',
@@ -270,6 +272,18 @@ export function EditarPaciente() {
         sesionesUsadas += pendientes.length
       }
 
+      // Si se está dando de baja el plan que había (se vació "Total sesiones
+      // autorizadas"), las sesiones que se hicieron bajo ese plan vuelven a
+      // quedar sin autorizar, para descontarlas de nuevo cuando llegue la orden real
+      let revertidas = []
+      if (!f.sesionesTotal && planAnterior) {
+        const tSnap = await getDocs(query(collection(db,'turnos'), where('pacienteId','==',id)))
+        revertidas = tSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t =>
+          t.asistencia === 'asistio' && t.autorizado !== false &&
+          (!planAnterior.fechaInicio || (t.fecha||'') >= planAnterior.fechaInicio)
+        )
+      }
+
       const plan = f.sesionesTotal ? {
         sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas,
         fechaInicio: f.fechaInicio||null, fechaVencimiento: venc,
@@ -290,6 +304,9 @@ export function EditarPaciente() {
         numero++
         batch.update(doc(db,'turnos',t.id), { autorizado: true, nroSesion: numero })
       })
+      revertidas.forEach(t => {
+        batch.update(doc(db,'turnos',t.id), { autorizado: false, nroSesion: null })
+      })
       await batch.commit()
 
       invalidarPacs()
@@ -298,6 +315,10 @@ export function EditarPaciente() {
       if (pendientes.length > 0) {
         await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Autorizó sesiones pendientes',
           `${pendientes.length} sesión${pendientes.length>1?'es':''} de ${f.apellido} ${f.nombre}`)
+      }
+      if (revertidas.length > 0) {
+        await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Dio de baja el plan',
+          `${revertidas.length} sesión${revertidas.length>1?'es':''} de ${f.apellido} ${f.nombre} volvió a quedar sin autorizar`)
       }
       navigate(`/pacientes/${id}`)
     } catch(err) { console.error(err); alert('Error al guardar') }
