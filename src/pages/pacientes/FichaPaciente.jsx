@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc, collection, query, where, getDocs, orderBy, updateDoc, writeBatch, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, collection, query, where, getDocs, orderBy, updateDoc, writeBatch, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
@@ -63,8 +63,8 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
   }
 
   return (
-    <tr>
-      <td>{fmtFecha(turno.fecha)}</td>
+    <tr style={turno.autorizado === false ? { background: 'rgba(220,53,69,0.06)' } : undefined}>
+      <td style={turno.autorizado === false ? { color: 'var(--ro)' } : undefined}>{fmtFecha(turno.fecha)}</td>
       <td>{turno.hora || '—'}</td>
       <td>
         {editandoKine ? (
@@ -84,7 +84,12 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine }) {
           </div>
         )}
       </td>
-      <td>{turno.nroSesion || '—'}</td>
+      <td>
+        {turno.autorizado === false
+          ? <span className="badge br" title="Se descuenta del plan cuando se cargue la autorización">No autorizado</span>
+          : (turno.nroSesion || '—')
+        }
+      </td>
       <td>
         {turno.asistencia === 'asistio' && (
           <div className="row" style={{ gap: 4 }}>
@@ -121,6 +126,7 @@ export default function FichaPaciente() {
   const [modalToken, setModalToken] = useState(false)
   const [eliminando, setEliminando] = useState(false)
   const [kineRefNombre, setKineRefNombre] = useState(null)
+  const [modoRegistro, setModoRegistro] = useState('normal')
 
   useEffect(() => {
     async function cargar() {
@@ -158,10 +164,23 @@ export default function FichaPaciente() {
   // Intento de registrar sesión — verifica si necesita token primero
   function intentarRegistrar() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    setModoRegistro('normal')
     if (necesitaToken(pac.obraSocial)) {
       setModalToken(true) // mostrar recordatorio
     } else {
       registrarSesion()
+    }
+  }
+
+  // Registro de asistencia sin sesiones autorizadas todavía — requiere confirmación explícita
+  function intentarRegistrarSinAutorizacion() {
+    if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    if (!window.confirm('Este paciente todavía no tiene sesiones autorizadas. ¿Registrar la asistencia igual como NO AUTORIZADA? Se descontará del plan apenas se cargue la autorización.')) return
+    setModoRegistro('sinAutorizacion')
+    if (necesitaToken(pac.obraSocial)) {
+      setModalToken(true)
+    } else {
+      registrarSesionSinAutorizacion()
     }
   }
 
@@ -200,6 +219,42 @@ export default function FichaPaciente() {
       setTurnos(prev => [nuevoT, ...prev])
       setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
       invalidarPacs()
+      setExito(true)
+      setTimeout(() => setExito(false), 3000)
+    } catch(err) { console.error(err); alert('Error al registrar') }
+    setRegistrando(false)
+  }
+
+  // Registra asistencia sin plan/sesiones autorizadas — queda marcada en rojo hasta que se cargue el plan
+  async function registrarSesionSinAutorizacion() {
+    setModalToken(false)
+    setRegistrando(true)
+    try {
+      const kine = kines.find(k => k.id === kineSelId)
+      const hoyStr = hoy()
+      const nuevoRef = await addDoc(collection(db,'turnos'), {
+        fecha: hoyStr,
+        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        pacienteId: id,
+        pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
+        pacienteDni: pac.dni || '', obraSocial: pac.obraSocial || '',
+        kinesiologoId: kineSelId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null,
+        autorizado: false,
+        asistencia: 'asistio', asistenciaTs: serverTimestamp(),
+        creadoPor: user.uid,
+        creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+        ts: serverTimestamp()
+      })
+      const nuevoT = {
+        id: nuevoRef.id, fecha: hoyStr,
+        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        kinesiologoId: kineSelId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null, autorizado: false, asistencia: 'asistio'
+      }
+      setTurnos(prev => [nuevoT, ...prev])
       setExito(true)
       setTimeout(() => setExito(false), 3000)
     } catch(err) { console.error(err); alert('Error al registrar') }
@@ -261,13 +316,15 @@ export default function FichaPaciente() {
   const ini  = ((pac.nombre?.[0]||'') + (pac.apellido?.[0]||'')).toUpperCase()
   const sesRestantes = plan ? (plan.sesionesTotal - (plan.sesionesUsadas || 0)) : null
   const conToken = necesitaToken(pac.obraSocial)
+  const sinAutorizarCount = turnos.filter(t => t.autorizado === false).length
+  const excedido = plan && (plan.sesionesUsadas || 0) > plan.sesionesTotal
 
   return (
     <div>
       {modalToken && (
         <ModalToken
           obraSocial={pac.obraSocial}
-          onConfirmar={registrarSesion}
+          onConfirmar={() => modoRegistro === 'sinAutorizacion' ? registrarSesionSinAutorizacion() : registrarSesion()}
           onCancelar={() => setModalToken(false)}
         />
       )}
@@ -321,13 +378,19 @@ export default function FichaPaciente() {
             <div style={{ color:'#888', fontSize:13 }}>
               Sin plan cargado.{' '}
               <button className="btn bs bsm" onClick={() => navigate(`/pacientes/${id}/editar`)}>Cargar plan</button>
+              {sinAutorizarCount > 0 && (
+                <div style={{ color:'var(--ro)', fontSize:12, marginTop:8 }}>
+                  ⚠ {sinAutorizarCount} sesión{sinAutorizarCount>1?'es':''} sin autorizar registrada{sinAutorizarCount>1?'s':''} — se descuenta{sinAutorizarCount>1?'n':''} del plan al cargarlo.
+                </div>
+              )}
             </div>
           ) : (
             <>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
                 <div className="met">
                   <div className="met-l">Sesiones</div>
-                  <div style={{ fontSize:20, fontWeight:700, color:'var(--az)' }}>{plan.sesionesUsadas||0}/{plan.sesionesTotal}</div>
+                  <div style={{ fontSize:20, fontWeight:700, color: excedido ? 'var(--ro)' : 'var(--az)' }}>{plan.sesionesUsadas||0}/{plan.sesionesTotal}</div>
+                  {excedido && <div style={{ fontSize:11, color:'var(--ro)' }}>{plan.sesionesUsadas - plan.sesionesTotal} de más</div>}
                 </div>
                 <div className="met">
                   <div className="met-l">Días hábiles</div>
@@ -350,6 +413,27 @@ export default function FichaPaciente() {
           )}
         </div>
       </div>
+
+      {/* Registro sin autorización — paciente sin plan cargado todavía */}
+      {!arch && !plan && (
+        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--ro)' }}>
+          <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión sin autorización</div>
+          <div style={{ fontSize:13, color:'#666', marginBottom:10 }}>
+            Este paciente todavía no tiene sesiones autorizadas. Podés registrar que asistió igual — queda marcado en <strong style={{ color:'var(--ro)' }}>rojo</strong> como no autorizado, y se descuenta automáticamente del plan cuando se cargue la autorización.
+          </div>
+          <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
+            <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
+              <option value="">Seleccioná kinesiológo...</option>
+              {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+            </select>
+            <button className="btn bd" onClick={intentarRegistrarSinAutorizacion} disabled={registrando || !kineSelId} style={{ minWidth:220 }}>
+              {registrando ? 'Registrando...' : '⚠ Registrar sin autorización'}
+            </button>
+            {exito && <div className="badge br" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada sin autorización</div>}
+          </div>
+        </div>
+      )}
 
       {/* Registro rápido */}
       {!arch && plan && est !== 'vencido' && (
