@@ -18,6 +18,7 @@ import Caja from './pages/caja/Caja'
 import Reportes from './pages/reportes/Reportes'
 import Usuarios from './pages/usuarios/Usuarios'
 import Kinesiologos from './pages/kinesiologos/Kinesiologos'
+import ObrasSociales from './pages/obrasSociales/ObrasSociales'
 import Logs from './pages/logs/Logs'
 
 function LimpiezaSilenciosa() {
@@ -66,6 +67,7 @@ function Rutas() {
           <Route path="reportes" element={<Reportes />} />
           <Route path="logs" element={<Logs />} />
           <Route path="kinesiologos" element={<Kinesiologos />} />
+          <Route path="obras-sociales" element={<ObrasSociales />} />
           <Route path="usuarios" element={<PrivR soloDueno><Usuarios /></PrivR>} />
         </Route>
       </Routes>
