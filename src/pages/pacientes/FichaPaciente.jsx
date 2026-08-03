@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular } from '../../utils/helpers'
 
 // Agrega un movimiento de entrada a la caja del mes actual (crea el doc si no existe)
 async function agregarMovimientoCaja(mov) {
@@ -220,7 +220,7 @@ export default function FichaPaciente() {
       ])
       if (!snap.exists()) { navigate('/pacientes'); return }
       const p = { id: snap.id, ...snap.data() }
-      if (!p.archivado && p.plan && estadoPlan(p.plan) === 'vencido') {
+      if (!esPacienteParticular(p) && !p.archivado && p.plan && estadoPlan(p.plan) === 'vencido') {
         await updateDoc(doc(db,'pacientes',id), { archivado: true, fechaArchivado: hoy() })
         p.archivado = true; invalidarPacs()
       }
@@ -485,7 +485,7 @@ export default function FichaPaciente() {
   const conToken = necesitaToken(pac.obraSocial)
   const sinAutorizarCount = turnos.filter(t => t.autorizado === false).length
   const excedido = plan && (plan.sesionesUsadas || 0) > plan.sesionesTotal
-  const esParticular = pac.modalidad === 'particular'
+  const esParticular = esPacienteParticular(pac)
   const sesionesAdeudadas = turnos.filter(t => t.pagado === false)
   const totalAdeudado = sesionesAdeudadas.reduce((a,t) => a + (t.monto||0), 0)
 
