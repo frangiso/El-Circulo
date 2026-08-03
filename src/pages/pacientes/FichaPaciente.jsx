@@ -210,13 +210,15 @@ export default function FichaPaciente() {
   const [modoRegistro, setModoRegistro] = useState('normal')
   const [fechaRegistro, setFechaRegistro] = useState(hoy())
   const [modalPago, setModalPago] = useState(false)
+  const [senasActivas, setSenasActivas] = useState([])
 
   useEffect(() => {
     async function cargar() {
-      const [snap, k, tsSnap] = await Promise.all([
+      const [snap, k, tsSnap, senasSnap] = await Promise.all([
         getDoc(doc(db,'pacientes',id)),
         getKines(),
-        getDocs(query(collection(db,'turnos'), where('pacienteId','==',id), orderBy('fecha','desc')))
+        getDocs(query(collection(db,'turnos'), where('pacienteId','==',id), orderBy('fecha','desc'))),
+        getDocs(query(collection(db,'senas'), where('pacienteId','==',id), where('estado','==','activa')))
       ])
       if (!snap.exists()) { navigate('/pacientes'); return }
       const p = { id: snap.id, ...snap.data() }
@@ -226,6 +228,7 @@ export default function FichaPaciente() {
       }
       setPac(p); setKines(k)
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setSenasActivas(senasSnap.docs.map(d => ({ id: d.id, ...d.data() })))
 
       const refId = p.plan?.kinesiologoRef
       if (refId) {
@@ -520,6 +523,12 @@ export default function FichaPaciente() {
       {conToken && (
         <div className="al alb">
           🔑 Este paciente tiene <strong>{pac.obraSocial}</strong> — recordá pedirle el <strong>token</strong> antes de cada sesión.
+        </div>
+      )}
+      {senasActivas.length > 0 && (
+        <div className="al ala">
+          💰 Tiene {senasActivas.length > 1 ? `${senasActivas.length} señas activas` : 'una seña activa'} por <strong>{fmtMonto(senasActivas.reduce((a,s)=>a+(s.monto||0),0))}</strong>.{' '}
+          <button className="btn bs bsm" onClick={() => navigate('/senas')}>Ver en Caja de señas</button>
         </div>
       )}
 

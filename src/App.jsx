@@ -15,6 +15,7 @@ import NuevoPaciente from './pages/pacientes/NuevoPaciente'
 import FichaPaciente from './pages/pacientes/FichaPaciente'
 import EditarPaciente from './pages/pacientes/EditarPaciente'
 import Caja from './pages/caja/Caja'
+import Senas from './pages/senas/Senas'
 import Reportes from './pages/reportes/Reportes'
 import Usuarios from './pages/usuarios/Usuarios'
 import Kinesiologos from './pages/kinesiologos/Kinesiologos'
@@ -64,6 +65,7 @@ function Rutas() {
           <Route path="pacientes/:id" element={<FichaPaciente />} />
           <Route path="pacientes/:id/editar" element={<EditarPaciente />} />
           <Route path="caja" element={<Caja />} />
+          <Route path="senas" element={<Senas />} />
           <Route path="reportes" element={<Reportes />} />
           <Route path="logs" element={<Logs />} />
           <Route path="kinesiologos" element={<Kinesiologos />} />
