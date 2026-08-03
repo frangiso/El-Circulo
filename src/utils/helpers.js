@@ -86,3 +86,11 @@ export function fechaHaceNMeses(n) {
 
 export const OBRAS_BASE = ['DOSEP','GALENO','MEDIAL GISE','OSFATUN','OSDE','PAMI','FEMESA','Particular']
 export const ROLES = { dueno:'Dueño', kinesiologo:'Kinesiológo', secretaria:'Secretaria', pendiente:'Pendiente' }
+
+// Un paciente es "particular" si tiene la modalidad seteada, o si (herencia de antes de
+// que existiera la modalidad) tiene "particular" cargado como obra social, en cualquier mayúscula/minúscula
+export function esParticular(pac) {
+  if (!pac) return false
+  if (pac.modalidad === 'particular') return true
+  return (pac.obraSocial || '').trim().toLowerCase() === 'particular'
+}

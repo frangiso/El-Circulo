@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
-import { estadoPlan, diasHabilesRestantes } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, esParticular } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11,7 +11,7 @@ const ILupa = () => (
 )
 
 function PlanBadge({ p }) {
-  if (p?.modalidad === 'particular') return <span className="badge bb">Particular</span>
+  if (esParticular(p)) return <span className="badge bb">Particular</span>
   if (!p || !p.plan) return <span className="badge bk">Sin plan</span>
   const e = estadoPlan(p.plan)
   if (e === 'vencido') return <span className="badge br">Vencido</span>

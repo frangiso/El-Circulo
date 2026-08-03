@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
-import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE } from '../../utils/helpers'
+import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE, esParticular } from '../../utils/helpers'
 
 const INIT = { modalidad:'obraSocial', nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
@@ -263,7 +263,7 @@ export function EditarPaciente() {
       const d = s.data(); setEraArch(d.archivado === true)
       setPlanAnterior(d.plan || null)
       setInicial({
-        modalidad: d.modalidad||'obraSocial',
+        modalidad: d.modalidad || (esParticular(d) ? 'particular' : 'obraSocial'),
         nombre: d.nombre||'', apellido: d.apellido||'', dni: d.dni||'', telefono: d.telefono||'',
         obraSocial: d.obraSocial||'', nroAfiliado: d.nroAfiliado||'',
         diagnostico: d.diagnostico||'', observaciones: d.observaciones||'',
