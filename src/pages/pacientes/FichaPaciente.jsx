@@ -367,6 +367,12 @@ export default function FichaPaciente() {
               <tr><td style={{ color:'#888', padding:'4px 0' }}>Obra social</td><td style={{ padding:'4px 0' }}>{pac.obraSocial?<span className="badge bb">{pac.obraSocial}</span>:'—'}</td></tr>
               <tr><td style={{ color:'#888', padding:'4px 0' }}>N° afiliado</td><td style={{ padding:'4px 0' }}>{pac.nroAfiliado||'—'}</td></tr>
               <tr><td style={{ color:'#888', padding:'4px 0' }}>Diagnóstico</td><td style={{ padding:'4px 0' }}>{pac.diagnostico||'—'}</td></tr>
+              <tr><td style={{ color:'#888', padding:'4px 0' }}>Orden médica</td><td style={{ padding:'4px 0' }}>
+                {pac.ordenFecha
+                  ? <>{fmtFecha(pac.ordenFecha)}{pac.ordenDetalle ? ' — '+pac.ordenDetalle : ''}</>
+                  : <span style={{ color:'var(--na)' }}>Sin orden entregada todavía</span>
+                }
+              </td></tr>
               {pac.observaciones && <tr><td style={{ color:'#888', padding:'4px 0' }}>Obs.</td><td style={{ padding:'4px 0' }}>{pac.observaciones}</td></tr>}
             </tbody>
           </table>
