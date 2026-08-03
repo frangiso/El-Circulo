@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useCache } from '../../context/AppCache'
@@ -19,6 +19,7 @@ export default function Reportes() {
   const [carg, setCarg]     = useState(false)
   const [cargado, setCargado] = useState(false)
   const [busqK, setBK]      = useState('')
+  const [expandido, setExpandido] = useState(null)
 
   // Carga kines desde colección 'kinesiologos' (carga manual) via AppCache
   useEffect(() => {
@@ -44,7 +45,7 @@ export default function Reportes() {
   }
 
   function onMesChange(m) {
-    setMes(m); setCargado(false); setT([]); setBK('')
+    setMes(m); setCargado(false); setT([]); setBK(''); setExpandido(null)
   }
 
   // Todos los turnos del mes — incluye los cargados desde ficha de paciente
@@ -59,15 +60,18 @@ export default function Reportes() {
     const kId = t.kinesiologoId || 'sin-asignar'
     const kNombre = t.kinesiologoNombre || 'Sin asignar'
     if (!mapaKines[kId]) {
-      mapaKines[kId] = { id: kId, nombre: kNombre, sesiones: 0, pacientes: new Set() }
+      mapaKines[kId] = { id: kId, nombre: kNombre, sesiones: 0, pacientes: new Map() }
     }
     mapaKines[kId].sesiones++
-    if (t.pacienteId) mapaKines[kId].pacientes.add(t.pacienteId)
+    if (t.pacienteId) {
+      const nombrePac = `${t.pacienteApellido || ''} ${t.pacienteNombre || ''}`.trim() || 'Sin nombre'
+      mapaKines[kId].pacientes.set(t.pacienteId, nombrePac)
+    }
   })
 
   // Convertir a array y ordenar por sesiones
   const porKine = Object.values(mapaKines)
-    .map(k => ({ ...k, pacs: k.pacientes.size }))
+    .map(k => ({ ...k, pacs: k.pacientes.size, pacientesLista: [...k.pacientes.values()].sort() }))
     .sort((a, b) => b.sesiones - a.sesiones)
 
   // También mostrar kines activos con 0 sesiones este mes
@@ -75,7 +79,8 @@ export default function Reportes() {
     id: k.id,
     nombre: k.apellido + ' ' + k.nombre,
     sesiones: 0,
-    pacs: 0
+    pacs: 0,
+    pacientesLista: []
   }))
 
   const todosKines = [...porKine, ...kinesConCero]
@@ -160,17 +165,34 @@ export default function Reportes() {
                     <tr><td colSpan="4" className="emt">Sin datos este mes</td></tr>
                   )}
                   {kinesVis.map(k => (
-                    <tr key={k.id} style={{ opacity: k.sesiones === 0 ? 0.5 : 1 }}>
-                      <td className="fw6">{k.nombre}</td>
-                      <td>
-                        {k.sesiones > 0
-                          ? <span style={{ fontWeight: 700, color: 'var(--ve)' }}>{k.sesiones}</span>
-                          : <span style={{ color: '#aaa' }}>0</span>
-                        }
-                      </td>
-                      <td>{k.pacs || '—'}</td>
-                      <td>{total > 0 && k.sesiones > 0 ? ((k.sesiones / total) * 100).toFixed(1) + '%' : '—'}</td>
-                    </tr>
+                    <Fragment key={k.id}>
+                      <tr style={{ opacity: k.sesiones === 0 ? 0.5 : 1 }}>
+                        <td className="fw6">{k.nombre}</td>
+                        <td>
+                          {k.sesiones > 0
+                            ? <span style={{ fontWeight: 700, color: 'var(--ve)' }}>{k.sesiones}</span>
+                            : <span style={{ color: '#aaa' }}>0</span>
+                          }
+                        </td>
+                        <td>
+                          {k.pacs || '—'}
+                          {k.pacs > 0 && (
+                            <button className="btn bs bsm" style={{ marginLeft: 8, fontSize: 10, padding: '2px 6px' }}
+                              onClick={() => setExpandido(expandido === k.id ? null : k.id)}>
+                              {expandido === k.id ? 'Ocultar' : 'Ver'}
+                            </button>
+                          )}
+                        </td>
+                        <td>{total > 0 && k.sesiones > 0 ? ((k.sesiones / total) * 100).toFixed(1) + '%' : '—'}</td>
+                      </tr>
+                      {expandido === k.id && (
+                        <tr>
+                          <td colSpan="4" style={{ background: '#f9f9f9', fontSize: 12, padding: '10px 14px', color: '#444' }}>
+                            {k.pacientesLista.join(', ')}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                   {porKine.length > 0 && (
                     <tr className="ttr">
