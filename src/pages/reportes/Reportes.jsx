@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useCache } from '../../context/AppCache'
-import { mesActual, labelMes, getMeses } from '../../utils/helpers'
+import { mesActual, labelMes, getMeses, fmtFecha } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -65,13 +65,22 @@ export default function Reportes() {
     mapaKines[kId].sesiones++
     if (t.pacienteId) {
       const nombrePac = `${t.pacienteApellido || ''} ${t.pacienteNombre || ''}`.trim() || 'Sin nombre'
-      mapaKines[kId].pacientes.set(t.pacienteId, nombrePac)
+      if (!mapaKines[kId].pacientes.has(t.pacienteId)) {
+        mapaKines[kId].pacientes.set(t.pacienteId, { nombre: nombrePac, fechas: [] })
+      }
+      mapaKines[kId].pacientes.get(t.pacienteId).fechas.push(t.fecha)
     }
   })
 
   // Convertir a array y ordenar por sesiones
   const porKine = Object.values(mapaKines)
-    .map(k => ({ ...k, pacs: k.pacientes.size, pacientesLista: [...k.pacientes.values()].sort() }))
+    .map(k => ({
+      ...k,
+      pacs: k.pacientes.size,
+      pacientesLista: [...k.pacientes.values()]
+        .map(p => ({ nombre: p.nombre, fechas: [...p.fechas].sort() }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    }))
     .sort((a, b) => b.sesiones - a.sesiones)
 
   // También mostrar kines activos con 0 sesiones este mes
@@ -188,7 +197,13 @@ export default function Reportes() {
                       {expandido === k.id && (
                         <tr>
                           <td colSpan="4" style={{ background: '#f9f9f9', fontSize: 12, padding: '10px 14px', color: '#444' }}>
-                            {k.pacientesLista.join(', ')}
+                            {k.pacientesLista.map((p, i) => (
+                              <div key={i} style={{ padding: '2px 0' }}>
+                                <span className="fw6">{p.nombre}</span>
+                                {' — '}
+                                {p.fechas.map(fmtFecha).join(', ')}
+                              </div>
+                            ))}
                           </td>
                         </tr>
                       )}
