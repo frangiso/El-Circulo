@@ -116,7 +116,7 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
       <div className="card">
         <div className="card-title">Orden médica</div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
-          Se guarda como una orden nueva en el historial del paciente. Dejalo vacío si no hay una orden nueva para cargar ahora.
+          Opcional — se puede cargar el paciente sin haber recibido la orden todavía.
         </div>
         <div className="fg">
           <div className="ff">
@@ -198,19 +198,14 @@ export function NuevoPaciente() {
         fechaInicio: f.fechaInicio || null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef || null
       } : null
-      const pacRef = await addDoc(collection(db,'pacientes'), {
+      await addDoc(collection(db,'pacientes'), {
         nombre: f.nombre.trim(), apellido: f.apellido.trim(),
         dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
+        ordenFecha: f.ordenFecha || null, ordenDetalle: f.ordenDetalle.trim(),
         plan, archivado: false, creadoPor: user.uid, creadoEn: serverTimestamp()
       })
-      if (f.ordenFecha) {
-        await addDoc(collection(db,'ordenes'), {
-          pacienteId: pacRef.id, fecha: f.ordenFecha, detalle: f.ordenDetalle.trim(),
-          creadoPor: user.uid, creadoPorNombre: `${perfil.apellido} ${perfil.nombre}`, ts: serverTimestamp()
-        })
-      }
       invalidarPacs()
       await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Nuevo paciente', `${f.apellido} ${f.nombre}`)
       navigate('/pacientes')
@@ -249,7 +244,7 @@ export function EditarPaciente() {
         diagnostico: d.diagnostico||'', observaciones: d.observaciones||'',
         sesionesTotal: d.plan?.sesionesTotal||'', sesionesUsadas: d.plan?.sesionesUsadas||0,
         fechaInicio: d.plan?.fechaInicio||'', kinesiologoRef: d.plan?.kinesiologoRef||'',
-        ordenFecha: '', ordenDetalle: ''
+        ordenFecha: d.ordenFecha||'', ordenDetalle: d.ordenDetalle||''
       })
     })
   }, [id])
@@ -287,6 +282,7 @@ export function EditarPaciente() {
         nombre: f.nombre.trim(), apellido: f.apellido.trim(), dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
+        ordenFecha: f.ordenFecha || null, ordenDetalle: f.ordenDetalle.trim(),
         plan, archivado: nuevoEst === 'vencido', actualizadoEn: serverTimestamp()
       })
       let numero = parseInt(f.sesionesUsadas)||0
@@ -295,13 +291,6 @@ export function EditarPaciente() {
         batch.update(doc(db,'turnos',t.id), { autorizado: true, nroSesion: numero })
       })
       await batch.commit()
-
-      if (f.ordenFecha) {
-        await addDoc(collection(db,'ordenes'), {
-          pacienteId: id, fecha: f.ordenFecha, detalle: f.ordenDetalle.trim(),
-          creadoPor: user.uid, creadoPorNombre: `${perfil.apellido} ${perfil.nombre}`, ts: serverTimestamp()
-        })
-      }
 
       invalidarPacs()
       const acc = eraArch && nuevoEst !== 'vencido' ? 'Reactivó paciente' : 'Edición paciente'
