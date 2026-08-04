@@ -286,7 +286,7 @@ export default function FichaPaciente() {
       }
       setPac(p); setKines(k)
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setSenasActivas(senasSnap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setSenasActivas(senasSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => !s.anulado))
 
       const refId = p.plan?.kinesiologoRef
       if (refId) {
