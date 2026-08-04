@@ -201,6 +201,10 @@ export default function Turnos() {
       const batch = writeBatch(db)
       // Sin plan cargado: la sesión queda marcada como no autorizada (se descuenta al cargar el plan)
       const turnoData = { asistencia: nuevoEst, asistenciaTs: serverTimestamp() }
+      // El turno puede tener una hora de agenda distinta a cuándo se marca la asistencia
+      // realmente (ej: turno de las 10hs pero se carga la asistencia a la tarde) — guardamos
+      // la hora real en que se marcó para que los reportes de mañana/tarde usen esa, no la agendada
+      if (nuevoEst === 'asistio') turnoData.horaAsistencia = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
       if (!pac?.plan) turnoData.autorizado = nuevoEst === 'asistio' ? false : null
       batch.update(doc(db,'turnos',turno.id), turnoData)
       if (nuevoEst === 'asistio' && pac?.plan) {
@@ -219,7 +223,7 @@ export default function Turnos() {
         await batch.commit()
       }
       setTurnos(prev => prev.map(t => t.id === turno.id
-        ? { ...t, asistencia: nuevoEst, ...(!pac?.plan ? { autorizado: nuevoEst === 'asistio' ? false : null } : {}) }
+        ? { ...t, asistencia: nuevoEst, ...(turnoData.horaAsistencia ? { horaAsistencia: turnoData.horaAsistencia } : {}), ...(!pac?.plan ? { autorizado: nuevoEst === 'asistio' ? false : null } : {}) }
         : t
       ))
     } catch(err) { console.error(err); alert('Error al actualizar') }

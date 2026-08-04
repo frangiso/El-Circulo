@@ -17,6 +17,12 @@ function esManana(hora) {
   return isNaN(h) || h < 14
 }
 
+// La hora que importa para mañana/tarde es cuándo se marcó la asistencia realmente,
+// no la hora agendada del turno (pueden diferir si se carga la asistencia más tarde)
+function horaEfectiva(t) {
+  return t.horaAsistencia || t.hora
+}
+
 export default function Reportes() {
   const { getKines, getPacientes } = useCache()
   const [vista, setVista]   = useState('mes') // 'mes' | 'dia'
@@ -78,7 +84,7 @@ export default function Reportes() {
       mapaKines[kId] = { id: kId, nombre: kNombre, sesiones: 0, manana: 0, tarde: 0, pacientes: new Map() }
     }
     mapaKines[kId].sesiones++
-    if (esManana(t.hora)) mapaKines[kId].manana++
+    if (esManana(horaEfectiva(t))) mapaKines[kId].manana++
     else mapaKines[kId].tarde++
     if (t.pacienteId) {
       const nombrePac = `${t.pacienteApellido || ''} ${t.pacienteNombre || ''}`.trim() || 'Sin nombre'
@@ -123,8 +129,8 @@ export default function Reportes() {
 
   const tituloPeriodo = vista === 'dia' ? fmtFecha(fechaDia) : labelMes(mes)
 
-  // Detalle de turnos del día, ordenados por hora
-  const detalleDia = [...turnos].sort((a,b) => (a.hora||'').localeCompare(b.hora||''))
+  // Detalle de turnos del día, ordenados por la hora real de asistencia (o la agendada si no asistió)
+  const detalleDia = [...turnos].sort((a,b) => (horaEfectiva(a)||'').localeCompare(horaEfectiva(b)||''))
 
   return (
     <div>
@@ -183,7 +189,7 @@ export default function Reportes() {
           <div className="card">
             <div className="card-title">Sesiones por kinesiológo — {tituloPeriodo}</div>
             <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
-              Incluye sesiones registradas desde turnos y desde fichas de pacientes. Mañana: hasta las 13:59 — Tarde: de 14:00 en adelante.
+              Incluye sesiones registradas desde turnos y desde fichas de pacientes. Mañana: hasta las 13:59 — Tarde: de 14:00 en adelante, según la hora real en que se marcó la asistencia (no la hora agendada del turno).
             </div>
             <div className="filtros">
               <div className="sw" style={{ flex: 1, minWidth: 200 }}>
@@ -276,8 +282,13 @@ export default function Reportes() {
                     <tbody>
                       {detalleDia.map(t => (
                         <tr key={t.id}>
-                          <td>{t.hora || '—'}</td>
-                          <td>{esManana(t.hora) ? <span className="badge ba">Mañana</span> : <span className="badge bb">Tarde</span>}</td>
+                          <td>
+                            {horaEfectiva(t) || '—'}
+                            {t.horaAsistencia && t.hora && t.horaAsistencia !== t.hora && (
+                              <div style={{ fontSize: 10, color: '#888' }}>Turno: {t.hora}</div>
+                            )}
+                          </td>
+                          <td>{esManana(horaEfectiva(t)) ? <span className="badge ba">Mañana</span> : <span className="badge bb">Tarde</span>}</td>
                           <td className="fw6">{t.pacienteApellido} {t.pacienteNombre}</td>
                           <td>{t.kinesiologoNombre || '—'}</td>
                           <td>{t.obraSocial ? <span className="badge bb">{t.obraSocial}</span> : '—'}</td>
