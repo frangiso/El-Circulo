@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, useCallback } from 'react'
 import { collection, getDocs, query, where, orderBy,
   doc, writeBatch, getDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase'
-import { OBRAS_BASE, estadoPlan, fechaHaceNMeses, escribirLog, hoy, esParticular } from '../utils/helpers'
+import { OBRAS_BASE, estadoPlan, fechaHaceNMeses, escribirLog, hoy, esParticular, esPami } from '../utils/helpers'
 
 const Ctx = createContext()
 export const useCache = () => useContext(Ctx)
@@ -61,7 +61,7 @@ export function CacheProvider({ children }) {
         set('limpiezaOk', true); return
       }
       const activos = await getPacientes(true)
-      const aArchivar = activos.filter(p => !esParticular(p) && p.plan && estadoPlan(p.plan)==='vencido')
+      const aArchivar = activos.filter(p => !esParticular(p) && !esPami(p) && p.plan && estadoPlan(p.plan)==='vencido')
       if (aArchivar.length > 0) {
         const batch = writeBatch(db)
         aArchivar.forEach(p => batch.update(doc(db,'pacientes',p.id), {archivado:true, fechaArchivado:hoyStr}))

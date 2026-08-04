@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, escribirLog } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, esPami as esPacientePami, escribirLog } from '../../utils/helpers'
 
 // ¿Le queda crédito de un pack de copagos prepago?
 function tieneCreditoCopago(pac) {
@@ -360,7 +360,7 @@ export default function FichaPaciente() {
       ])
       if (!snap.exists()) { navigate('/pacientes'); return }
       const p = { id: snap.id, ...snap.data() }
-      if (!esPacienteParticular(p) && !p.archivado && p.plan && estadoPlan(p.plan) === 'vencido') {
+      if (!esPacienteParticular(p) && !esPacientePami(p) && !p.archivado && p.plan && estadoPlan(p.plan) === 'vencido') {
         await updateDoc(doc(db,'pacientes',id), { archivado: true, fechaArchivado: hoy() })
         p.archivado = true; invalidarPacs()
       }
@@ -669,7 +669,67 @@ export default function FichaPaciente() {
         `${sesiones} sesiones — ${fmtMonto(montoTotal)} — ${pac.apellido} ${pac.nombre}`)
       setPac(prev => ({ ...prev, copagoPlan: nuevoPlan }))
       setModalPack(false)
-    } catch(err) { console.error(err); alert('Error al guardar el pack') }
+      return nuevoPlan
+    } catch(err) { console.error(err); alert('Error al guardar el pack'); return null }
+  }
+
+  // Registra una sesión de un paciente PAMI — funciona como particular (sin plan,
+  // nunca se archiva) pero siempre se paga consumiendo un pack prepago de sesiones.
+  // Si no queda crédito en el pack, primero pide cargar uno nuevo (de la cantidad que sea).
+  async function registrarSesionPami(pagoInfo, planOverride = null) {
+    setModalPack(false)
+    setRegistrando(true)
+    try {
+      const kine = kines.find(k => k.id === kineSelId)
+      const fechaStr = fechaRegistro || hoy()
+      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const planBase = planOverride || pac.copagoPlan
+      const nuevoCopagoUsadas = (planBase?.sesionesUsadas || 0) + 1
+      const turnoData = {
+        fecha: fechaStr, hora: horaStr,
+        pacienteId: id,
+        pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
+        pacienteDni: pac.dni || '', obraSocial: pac.obraSocial || '',
+        kinesiologoId: kineSelId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null,
+        asistencia: 'asistio', asistenciaTs: serverTimestamp(),
+        pagado: true, pagadoConPack: true,
+        creadoPor: user.uid,
+        creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+        ts: serverTimestamp()
+      }
+      const nuevoRef = await addDoc(collection(db,'turnos'), turnoData)
+      await updateDoc(doc(db,'pacientes',id), { 'copagoPlan.sesionesUsadas': nuevoCopagoUsadas })
+      const nuevoT = {
+        id: nuevoRef.id, fecha: fechaStr, hora: horaStr,
+        kinesiologoId: kineSelId, kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null, asistencia: 'asistio', pagado: true, pagadoConPack: true
+      }
+      setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
+      setPac(prev => ({ ...prev, copagoPlan: { ...(planOverride || prev.copagoPlan), sesionesUsadas: nuevoCopagoUsadas } }))
+      setFechaRegistro(hoy())
+      setExito(true)
+      setTimeout(() => setExito(false), 3000)
+    } catch(err) { console.error(err); alert('Error al registrar') }
+    setRegistrando(false)
+  }
+
+  // Intenta registrar sesión de paciente PAMI — si tiene crédito de pack lo consume solo,
+  // si no, primero pide cargar un pack nuevo
+  function intentarRegistrarPami() {
+    if (!kineSelId) return alert('Seleccioná un kinesiológo')
+    if (!fechaRegistro) return alert('Seleccioná una fecha')
+    setModoRegistro('pami')
+    if (tieneCreditoCopago(pac)) registrarSesionPami({ pagado: true, usoPack: true })
+    else setModalPack(true)
+  }
+
+  // Cuando se carga un pack en el contexto de "registrar sesión sin crédito", además
+  // de cargar el pack registra de una la sesión que lo disparó, consumiendo 1 de ahí
+  async function cargarPackYRegistrarPami(sesiones, montoTotal, medioPago) {
+    const nuevoPlan = await cargarPackCopago(sesiones, montoTotal, medioPago)
+    if (nuevoPlan) await registrarSesionPami({ pagado: true, usoPack: true }, nuevoPlan)
   }
 
   // Anula una sesión (no la borra) — revierte plan/pack, y anula el movimiento
@@ -751,7 +811,8 @@ export default function FichaPaciente() {
   const sinAutorizarCount = turnos.filter(t => t.autorizado === false && !t.anulado).length
   const excedido = plan && (plan.sesionesUsadas || 0) > plan.sesionesTotal
   const esParticular = esPacienteParticular(pac)
-  const conCopago = requiereCopagoFn(pac)
+  const pami = esPacientePami(pac)
+  const conCopago = requiereCopagoFn(pac) && !pami
   const sesionesAdeudadas = turnos.filter(t => t.pagado === false && !t.anulado)
   const totalAdeudado = sesionesAdeudadas.reduce((a,t) => a + (t.monto||0), 0)
 
@@ -772,7 +833,7 @@ export default function FichaPaciente() {
         }} onCancelar={() => setModalPago(false)} />
       )}
       {modalPack && (
-        <ModalPack onConfirmar={cargarPackCopago} onCancelar={() => setModalPack(false)} />
+        <ModalPack onConfirmar={modoRegistro === 'pami' ? cargarPackYRegistrarPami : cargarPackCopago} onCancelar={() => setModalPack(false)} />
       )}
 
       <div className="row" style={{ marginBottom: 20 }}>
@@ -831,7 +892,7 @@ export default function FichaPaciente() {
         </div>
 
         <div className="card">
-          <div className="card-title">{esParticular ? 'Cuenta corriente' : 'Estado del plan'}</div>
+          <div className="card-title">{(esParticular || pami) ? 'Cuenta corriente' : 'Estado del plan'}</div>
           {esParticular ? (
             sesionesAdeudadas.length === 0 ? (
               <div style={{ color:'#888', fontSize:13 }}>Sin sesiones adeudadas.</div>
@@ -840,6 +901,21 @@ export default function FichaPaciente() {
                 ⚠ {sesionesAdeudadas.length} sesión{sesionesAdeudadas.length>1?'es':''} adeudada{sesionesAdeudadas.length>1?'s':''} — {fmtMonto(totalAdeudado)}
               </div>
             )
+          ) : pami ? (
+            <>
+              <div className="row" style={{ justifyContent:'space-between', marginBottom:6 }}>
+                <div style={{ fontSize:12, color:'#888', fontWeight:600 }}>Pack de sesiones prepagas</div>
+                <button className="btn bs bsm" onClick={() => { setModoRegistro('pack'); setModalPack(true) }}>+ Cargar pack</button>
+              </div>
+              {pac.copagoPlan ? (
+                <div style={{ fontSize:13 }}>
+                  <strong>{pac.copagoPlan.sesionesUsadas||0}/{pac.copagoPlan.sesionesTotal}</strong> sesiones usadas
+                  {!tieneCreditoCopago(pac) && <span style={{ color:'var(--na)' }}> — agotado, cargá un pack nuevo</span>}
+                </div>
+              ) : (
+                <div style={{ color:'#888', fontSize:13 }}>Sin pack cargado todavía.</div>
+              )}
+            </>
           ) : (
             <>
               {!plan ? (
@@ -928,8 +1004,33 @@ export default function FichaPaciente() {
         </div>
       )}
 
+      {/* Registro sesión — paciente PAMI (funciona como particular pero paga por packs) */}
+      {!arch && pami && (
+        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
+          <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
+          <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
+            {tieneCreditoCopago(pac)
+              ? `Tiene pack activo (${pac.copagoPlan.sesionesTotal - (pac.copagoPlan.sesionesUsadas||0)} restantes) — se descuenta solo, sin preguntar.`
+              : 'No tiene pack con crédito — al confirmar te va a pedir cargar un pack nuevo antes de registrar.'}
+          </div>
+          <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
+            <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
+            <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
+              <option value="">Seleccioná kinesiológo...</option>
+              {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+            </select>
+            <button className="btn bp" onClick={intentarRegistrarPami} disabled={registrando || !kineSelId || !fechaRegistro} style={{ minWidth:160 }}>
+              {registrando ? 'Registrando...' : '✓ Marcar asistencia'}
+            </button>
+            {exito && <div className="badge bg" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada</div>}
+          </div>
+        </div>
+      )}
+
       {/* Registro sin autorización — paciente sin plan cargado todavía */}
-      {!arch && !esParticular && !plan && (
+      {!arch && !esParticular && !pami && !plan && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--ro)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión sin autorización</div>
           <div style={{ fontSize:13, color:'#666', marginBottom:10 }}>
@@ -955,7 +1056,7 @@ export default function FichaPaciente() {
       )}
 
       {/* Registro rápido */}
-      {!arch && !esParticular && plan && est !== 'vencido' && (
+      {!arch && !esParticular && !pami && plan && est !== 'vencido' && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
-import { estadoPlan, diasHabilesRestantes, esParticular, requiereCopago } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, esParticular, requiereCopago, esPami } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12,6 +12,7 @@ const ILupa = () => (
 
 function PlanBadge({ p }) {
   if (esParticular(p)) return <span className="badge bb">Particular</span>
+  if (esPami(p)) return <span className="badge bb">PAMI (pack)</span>
   if (!p || !p.plan) return <span className="badge bk">Sin plan</span>
   const e = estadoPlan(p.plan)
   if (e === 'vencido') return <span className="badge br">Vencido</span>
@@ -166,7 +167,7 @@ export default function Pacientes() {
                     </td>
                     <td>
                       <PlanBadge p={p} />
-                      {requiereCopago(p) && <span className="badge bk" style={{ marginLeft: 4 }} title="Requiere copago por sesión">💳</span>}
+                      {requiereCopago(p) && !esPami(p) && <span className="badge bk" style={{ marginLeft: 4 }} title="Requiere copago por sesión">💳</span>}
                     </td>
                     <td>
                       <button

@@ -103,3 +103,11 @@ export function requiereCopago(pac) {
   if (pac.requiereCopago === true) return true
   return (pac.obraSocial || '').toLowerCase().includes('pami')
 }
+
+// PAMI funciona igual que un paciente particular (sin plan de obra social, nunca se
+// archiva) pero en vez de pagar sesión por sesión siempre prepaga por packs de varias
+// sesiones juntas (ej: 5 o 10). Es específico de PAMI, no del flag genérico de copago.
+export function esPami(pac) {
+  if (!pac) return false
+  return (pac.obraSocial || '').toLowerCase().includes('pami')
+}
