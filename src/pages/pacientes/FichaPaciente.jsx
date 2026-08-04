@@ -23,6 +23,31 @@ async function agregarMovimientoCaja(mov) {
   }
 }
 
+// Busca y anula (no borra) el movimiento de caja generado por un turno puntual —
+// para cuando se anula una sesión que ya había generado plata en Caja
+async function anularMovimientoCajaDeTurno(turno, uid, nombre) {
+  if (!turno.cajaMovMes) return
+  try {
+    const ref = doc(db, 'caja', 'caja_' + turno.cajaMovMes)
+    const snap = await getDoc(ref)
+    if (!snap.exists()) return
+    const movs = snap.data().movimientos || []
+    const idx = movs.findIndex(m => m.turnoId === turno.id && !m.anulado)
+    if (idx === -1) return
+    const nuevosMovs = [...movs]
+    nuevosMovs[idx] = {
+      ...nuevosMovs[idx],
+      anulado: true,
+      anuladoPor: uid,
+      anuladoPorNombre: nombre,
+      anuladoFecha: hoy(),
+      anuladoHora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      motivoAnulacion: 'Se anuló la sesión asociada'
+    }
+    await updateDoc(ref, { movimientos: nuevosMovs })
+  } catch(err) { console.error('No se pudo anular el movimiento de caja de la sesión:', err) }
+}
+
 function fmtFecha(s) {
   if (!s) return '—'
   const [y,m,d] = s.split('-'); return `${d}/${m}/${y}`
@@ -156,10 +181,41 @@ function ModalPack({ onConfirmar, onCancelar }) {
   )
 }
 
-function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcarPagada }) {
+// Modal de motivo — para anular una sesión (queda registrada, no se borra)
+function ModalMotivo({ titulo, resumen, onConfirmar, onCancelar }) {
+  const [motivo, setMotivo] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function confirmar() {
+    if (!motivo.trim()) return alert('Escribí el motivo')
+    setSaving(true)
+    await onConfirmar(motivo.trim())
+    setSaving(false)
+  }
+
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div className="mt" style={{ marginBottom: 6 }}>{titulo}</div>
+        {resumen && <div style={{ fontSize: 13, color: '#666', marginBottom: 14 }}>{resumen}</div>}
+        <div className="ff" style={{ marginBottom: 14 }}>
+          <label>Motivo *</label>
+          <textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Ej: se cargó a un paciente equivocado" autoFocus />
+        </div>
+        <div className="re">
+          <button type="button" className="btn bs" onClick={onCancelar} disabled={saving}>Cancelar</button>
+          <button type="button" className="btn bd" onClick={confirmar} disabled={saving}>{saving ? 'Guardando...' : 'Confirmar anulación'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FilaTurno({ turno, kines, onAnular, onCambiarKine, onMarcarPagada }) {
   const [editandoKine, setEditandoKine] = useState(false)
   const [loadingK, setLoadingK] = useState(false)
-  const [loadingE, setLoadingE] = useState(false)
+  const [anulando, setAnulando] = useState(false)
+  const [modalAnular, setModalAnular] = useState(false)
   const [modalLiquidar, setModalLiquidar] = useState(false)
   const [liquidando, setLiquidando] = useState(false)
 
@@ -178,11 +234,30 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcar
     setLoadingK(false)
   }
 
-  async function eliminar() {
-    if (!window.confirm('¿Eliminar la asistencia? Se devolverá la sesión al plan.')) return
-    setLoadingE(true)
-    await onEliminarAsistencia(turno)
-    setLoadingE(false)
+  function pedirAnular() {
+    if (!window.confirm('¿Anular esta sesión? Se devuelve al plan/pack y se anula el pago en Caja si lo hubo. Queda registrada, no se borra.')) return
+    setModalAnular(true)
+  }
+
+  async function confirmarAnular(motivo) {
+    setModalAnular(false)
+    setAnulando(true)
+    await onAnular(turno, motivo)
+    setAnulando(false)
+  }
+
+  if (turno.anulado) {
+    return (
+      <tr style={{ opacity: .5, textDecoration: 'line-through' }}>
+        <td>{fmtFecha(turno.fecha)}</td>
+        <td>{turno.hora || '—'}</td>
+        <td>{turno.kinesiologoNombre}</td>
+        <td>{turno.nroSesion || '—'}</td>
+        <td style={{ textDecoration: 'none' }}>
+          <span className="badge br" title={`${turno.motivoAnulacion} — ${turno.anuladoPorNombre}, ${fmtFecha(turno.anuladoFecha)}`}>Anulada</span>
+        </td>
+      </tr>
+    )
   }
 
   return (
@@ -217,6 +292,11 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcar
         {modalLiquidar && (
           <ModalPago soloPago onConfirmar={liquidar} onCancelar={() => setModalLiquidar(false)} />
         )}
+        {modalAnular && (
+          <ModalMotivo titulo="Anular sesión"
+            resumen={`${fmtFecha(turno.fecha)} — ${turno.kinesiologoNombre}`}
+            onConfirmar={confirmarAnular} onCancelar={() => setModalAnular(false)} />
+        )}
         {turno.asistencia === 'asistio' && (
           <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
             <span className="badge bg">Asistió</span>
@@ -233,7 +313,7 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcar
               </button>
             )}
             <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--ro)' }}
-              onClick={eliminar} disabled={loadingE} title="Eliminar asistencia">✕</button>
+              onClick={pedirAnular} disabled={anulando} title="Anular sesión">{anulando ? '...' : 'Anular'}</button>
           </div>
         )}
         {turno.asistencia === 'falto' && <span className="badge br">Faltó</span>}
@@ -241,7 +321,7 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcar
           <div className="row" style={{ gap: 4 }}>
             <span className="badge bk">Pendiente</span>
             <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px', color: 'var(--ro)' }}
-              onClick={eliminar} disabled={loadingE} title="Eliminar turno">✕</button>
+              onClick={pedirAnular} disabled={anulando} title="Anular turno">{anulando ? '...' : 'Anular'}</button>
           </div>
         )}
       </td>
@@ -388,15 +468,18 @@ export default function FichaPaciente() {
           profesionalNombre: kine.apellido + ' ' + kine.nombre,
           cargadoPor: user.uid,
           cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
-          fecha: hoy(), hora: horaStr
+          fecha: hoy(), hora: horaStr,
+          turnoId: turnoRef.id
         })
+        await updateDoc(doc(db,'turnos',turnoRef.id), { cajaMovMes: mesActual() })
       }
       const nuevoT = {
         id: turnoRef.id, fecha: fechaStr, hora: horaStr,
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: nuevasUsadas, asistencia: 'asistio',
-        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack } : {})
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack,
+          cajaMovMes: (pagoInfo.pagado && !pagoInfo.usoPack) ? mesActual() : undefined } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
       setPac(prev => ({
@@ -457,15 +540,18 @@ export default function FichaPaciente() {
           profesionalNombre: kine.apellido + ' ' + kine.nombre,
           cargadoPor: user.uid,
           cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
-          fecha: hoy(), hora: horaStr
+          fecha: hoy(), hora: horaStr,
+          turnoId: nuevoRef.id
         })
+        await updateDoc(doc(db,'turnos',nuevoRef.id), { cajaMovMes: mesActual() })
       }
       const nuevoT = {
         id: nuevoRef.id, fecha: fechaStr, hora: horaStr,
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: null, autorizado: false, asistencia: 'asistio',
-        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack } : {})
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack,
+          cajaMovMes: (pagoInfo.pagado && !pagoInfo.usoPack) ? mesActual() : undefined } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
       if (nuevoCopagoUsadas !== null) {
@@ -519,15 +605,18 @@ export default function FichaPaciente() {
           cargadoPor: user.uid,
           cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
           fecha: hoy(),
-          hora: horaStr
+          hora: horaStr,
+          turnoId: nuevoRef.id
         })
+        await updateDoc(doc(db,'turnos',nuevoRef.id), { cajaMovMes: mesActual() })
       }
       const nuevoT = {
         id: nuevoRef.id, fecha: fechaStr, hora: horaStr,
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: null, asistencia: 'asistio',
-        pagado: pagoInfo.pagado, monto: pagoInfo.pagado ? pagoInfo.monto : null, medioPago: pagoInfo.pagado ? pagoInfo.medioPago : null
+        pagado: pagoInfo.pagado, monto: pagoInfo.pagado ? pagoInfo.monto : null, medioPago: pagoInfo.pagado ? pagoInfo.medioPago : null,
+        cajaMovMes: pagoInfo.pagado ? mesActual() : undefined
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
       setFechaRegistro(hoy())
@@ -541,8 +630,9 @@ export default function FichaPaciente() {
   async function marcarComoPagada(turno, pagoInfo) {
     try {
       const kine = kines.find(k => k.id === turno.kinesiologoId)
+      const mesMov = mesActual()
       await updateDoc(doc(db,'turnos',turno.id), {
-        pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago
+        pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, cajaMovMes: mesMov
       })
       const esCopago = turno.nroSesion != null || turno.autorizado === false
       await agregarMovimientoCaja({
@@ -554,9 +644,10 @@ export default function FichaPaciente() {
         cargadoPor: user.uid,
         cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         fecha: hoy(),
-        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        turnoId: turno.id
       })
-      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago } : t))
+      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, cajaMovMes: mesMov } : t))
     } catch(err) { console.error(err); alert('Error al registrar el pago') }
   }
 
@@ -581,21 +672,42 @@ export default function FichaPaciente() {
     } catch(err) { console.error(err); alert('Error al guardar el pack') }
   }
 
-  async function eliminarAsistencia(turno) {
+  // Anula una sesión (no la borra) — revierte plan/pack, y anula el movimiento
+  // de Caja que haya generado esa sesión puntual, si generó alguno
+  async function anularTurno(turno, motivo) {
     try {
-      const batch = writeBatch(db)
-      batch.delete(doc(db,'turnos',turno.id))
-      if (turno.asistencia === 'asistio' && pac.plan) {
-        const nuevasUsadas = Math.max(0, (pac.plan?.sesionesUsadas || 0) - 1)
-        batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
-        await batch.commit()
-        setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
-      } else {
-        await batch.commit()
+      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const updates = {
+        anulado: true, anuladoPor: user.uid, anuladoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
+        anuladoFecha: hoy(), anuladoHora: horaStr, motivoAnulacion: motivo
       }
-      setTurnos(prev => prev.filter(t => t.id !== turno.id))
+      const batch = writeBatch(db)
+      batch.update(doc(db,'turnos',turno.id), updates)
+
+      let nuevoPlanUsadas = null
+      if (turno.asistencia === 'asistio' && pac.plan) {
+        nuevoPlanUsadas = Math.max(0, (pac.plan?.sesionesUsadas || 0) - 1)
+        batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevoPlanUsadas })
+      }
+      let nuevoCopagoUsadas = null
+      if (turno.pagadoConPack && pac.copagoPlan) {
+        nuevoCopagoUsadas = Math.max(0, (pac.copagoPlan.sesionesUsadas || 0) - 1)
+        batch.update(doc(db,'pacientes',id), { 'copagoPlan.sesionesUsadas': nuevoCopagoUsadas })
+      }
+      await batch.commit()
+
+      if (turno.pagado === true && !turno.pagadoConPack) {
+        await anularMovimientoCajaDeTurno(turno, user.uid, `${perfil.apellido} ${perfil.nombre}`)
+      }
+
+      await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Anuló sesión',
+        `${fmtFecha(turno.fecha)} — ${pac.apellido} ${pac.nombre} — ${motivo}`)
+
+      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, ...updates } : t))
+      if (nuevoPlanUsadas !== null) setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevoPlanUsadas } }))
+      if (nuevoCopagoUsadas !== null) setPac(prev => ({ ...prev, copagoPlan: { ...prev.copagoPlan, sesionesUsadas: nuevoCopagoUsadas } }))
       invalidarPacs()
-    } catch(err) { console.error(err); alert('Error al eliminar turno') }
+    } catch(err) { console.error(err); alert('Error al anular la sesión') }
   }
 
   async function cambiarKineTurno(turno, kineId) {
@@ -636,11 +748,11 @@ export default function FichaPaciente() {
   const ini  = ((pac.nombre?.[0]||'') + (pac.apellido?.[0]||'')).toUpperCase()
   const sesRestantes = plan ? (plan.sesionesTotal - (plan.sesionesUsadas || 0)) : null
   const conToken = necesitaToken(pac.obraSocial)
-  const sinAutorizarCount = turnos.filter(t => t.autorizado === false).length
+  const sinAutorizarCount = turnos.filter(t => t.autorizado === false && !t.anulado).length
   const excedido = plan && (plan.sesionesUsadas || 0) > plan.sesionesTotal
   const esParticular = esPacienteParticular(pac)
   const conCopago = requiereCopagoFn(pac)
-  const sesionesAdeudadas = turnos.filter(t => t.pagado === false)
+  const sesionesAdeudadas = turnos.filter(t => t.pagado === false && !t.anulado)
   const totalAdeudado = sesionesAdeudadas.reduce((a,t) => a + (t.monto||0), 0)
 
   return (
@@ -889,7 +1001,7 @@ export default function FichaPaciente() {
               <tbody>
                 {turnos.map(t => (
                   <FilaTurno key={t.id} turno={t} kines={kines}
-                    onEliminarAsistencia={eliminarAsistencia}
+                    onAnular={anularTurno}
                     onCambiarKine={cambiarKineTurno}
                     onMarcarPagada={marcarComoPagada} />
                 ))}

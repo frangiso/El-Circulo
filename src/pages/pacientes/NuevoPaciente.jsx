@@ -302,6 +302,7 @@ export function EditarPaciente() {
           collection(db,'turnos'), where('pacienteId','==',id), where('autorizado','==',false)
         ))
         pendientes = pendSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .filter(t => !t.anulado)
           .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
         sesionesUsadas += pendientes.length
       }
@@ -315,7 +316,7 @@ export function EditarPaciente() {
       if (!esParticular && !f.sesionesTotal && planAnterior) {
         const tSnap = await getDocs(query(collection(db,'turnos'), where('pacienteId','==',id)))
         revertidas = tSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t =>
-          t.asistencia === 'asistio' && t.autorizado !== false &&
+          !t.anulado && t.asistencia === 'asistio' && t.autorizado !== false &&
           (!planAnterior.fechaInicio || (t.fecha||'') >= planAnterior.fechaInicio)
         )
       }
