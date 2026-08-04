@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
-import { estadoPlan, diasHabilesRestantes, esParticular } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, esParticular, requiereCopago } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -164,7 +164,10 @@ export default function Pacientes() {
                         ? (p.plan.sesionesUsadas || 0) + ' / ' + p.plan.sesionesTotal
                         : '—'}
                     </td>
-                    <td><PlanBadge p={p} /></td>
+                    <td>
+                      <PlanBadge p={p} />
+                      {requiereCopago(p) && <span className="badge bk" style={{ marginLeft: 4 }} title="Requiere copago por sesión">💳</span>}
+                    </td>
                     <td>
                       <button
                         className="btn bs bsm"
