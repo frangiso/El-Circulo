@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
-import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE, esParticular, requiereCopago } from '../../utils/helpers'
+import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE, esParticular, requiereCopago, esPami } from '../../utils/helpers'
 
 const INIT = { modalidad:'obraSocial', requiereCopago:false, nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
@@ -28,6 +28,7 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
   const [chequando, setChequando] = useState(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
+  const pami = f.modalidad !== 'particular' && esPami(f)
 
   useEffect(() => {
     Promise.all([getKines(), getObras()]).then(([k,o]) => { setKines(k); setObras(o) })
@@ -128,12 +129,19 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
             <label>Diagnóstico</label>
             <input value={f.diagnostico} onChange={e => set('diagnostico', e.target.value)} />
           </div>
-          {f.modalidad !== 'particular' && (
+          {pami && (
+            <div className="ff full">
+              <div className="al alb" style={{ marginBottom: 0 }}>
+                PAMI funciona como un paciente particular: sin plan ni vencimiento, nunca se archiva. La diferencia es que en vez de pagar sesión por sesión, se le cargan packs prepagos de varias sesiones juntas (5, 10, las que sean) desde la ficha.
+              </div>
+            </div>
+          )}
+          {f.modalidad !== 'particular' && !pami && (
             <div className="ff full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" id="reqCopago" checked={f.requiereCopago}
                 onChange={e => set('requiereCopago', e.target.checked)} style={{ width: 'auto' }} />
               <label htmlFor="reqCopago" style={{ marginBottom: 0 }}>
-                Requiere copago (ej: PAMI) — además del plan, cada sesión pregunta si pagó el copago
+                Requiere copago (ej: obra social con copago fijo) — además del plan, cada sesión pregunta si pagó el copago
               </label>
             </div>
           )}
@@ -157,7 +165,7 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
         </div>
       </div>
 
-      {f.modalidad !== 'particular' && (
+      {f.modalidad !== 'particular' && !pami && (
         <div className="card">
           <div className="card-title">
             Plan de sesiones{' '}
@@ -222,14 +230,15 @@ export function NuevoPaciente() {
         invalidarObras()
       }
       const esParticular = f.modalidad === 'particular'
+      const pami = !esParticular && esPami(f)
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
-      const plan = (!esParticular && f.sesionesTotal) ? {
+      const plan = (!esParticular && !pami && f.sesionesTotal) ? {
         sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas: 0,
         fechaInicio: f.fechaInicio || null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef || null
       } : null
       await addDoc(collection(db,'pacientes'), {
-        modalidad: f.modalidad, requiereCopago: !esParticular && !!f.requiereCopago,
+        modalidad: f.modalidad, requiereCopago: !esParticular && !pami && !!f.requiereCopago,
         nombre: f.nombre.trim(), apellido: f.apellido.trim(),
         dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
@@ -291,13 +300,15 @@ export function EditarPaciente() {
         await addDoc(collection(db,'obrasSociales'), { nombre: f.obraSocial }); invalidarObras()
       }
       const esParticular = f.modalidad === 'particular'
+      const pami = !esParticular && esPami(f)
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
 
       // Si se está cargando un plan, las sesiones ya registradas sin autorización
-      // se descuentan del total (quedan marcadas como autorizadas y numeradas)
+      // se descuentan del total (quedan marcadas como autorizadas y numeradas).
+      // No aplica a PAMI — funciona sin plan, como particular.
       let sesionesUsadas = parseInt(f.sesionesUsadas)||0
       let pendientes = []
-      if (!esParticular && f.sesionesTotal) {
+      if (!esParticular && !pami && f.sesionesTotal) {
         const pendSnap = await getDocs(query(
           collection(db,'turnos'), where('pacienteId','==',id), where('autorizado','==',false)
         ))
@@ -313,7 +324,7 @@ export function EditarPaciente() {
       // de nuevo cuando llegue la orden real. Si el paciente pasa a particular,
       // el historial previo no se toca — el concepto de "autorizado" ya no aplica.
       let revertidas = []
-      if (!esParticular && !f.sesionesTotal && planAnterior) {
+      if (!esParticular && !pami && !f.sesionesTotal && planAnterior) {
         const tSnap = await getDocs(query(collection(db,'turnos'), where('pacienteId','==',id)))
         revertidas = tSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t =>
           !t.anulado && t.asistencia === 'asistio' && t.autorizado !== false &&
@@ -321,7 +332,7 @@ export function EditarPaciente() {
         )
       }
 
-      const plan = (!esParticular && f.sesionesTotal) ? {
+      const plan = (!esParticular && !pami && f.sesionesTotal) ? {
         sesionesTotal: parseInt(f.sesionesTotal), sesionesUsadas,
         fechaInicio: f.fechaInicio||null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef||null
@@ -330,7 +341,7 @@ export function EditarPaciente() {
 
       const batch = writeBatch(db)
       batch.update(doc(db,'pacientes',id), {
-        modalidad: f.modalidad, requiereCopago: !esParticular && !!f.requiereCopago,
+        modalidad: f.modalidad, requiereCopago: !esParticular && !pami && !!f.requiereCopago,
         nombre: f.nombre.trim(), apellido: f.apellido.trim(), dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
