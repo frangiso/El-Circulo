@@ -4,7 +4,12 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, escribirLog } from '../../utils/helpers'
+
+// ¿Le queda crédito de un pack de copagos prepago?
+function tieneCreditoCopago(pac) {
+  return !!pac?.copagoPlan && (pac.copagoPlan.sesionesUsadas || 0) < pac.copagoPlan.sesionesTotal
+}
 
 // Agrega un movimiento de entrada a la caja del mes actual (crea el doc si no existe)
 async function agregarMovimientoCaja(mov) {
@@ -103,6 +108,54 @@ function ModalPago({ soloPago, onConfirmar, onCancelar }) {
   )
 }
 
+// Modal para cargar un pack de copagos prepago (ej: PAMI paga 5 o 10 sesiones juntas)
+function ModalPack({ onConfirmar, onCancelar }) {
+  const [sesiones, setSesiones] = useState('5')
+  const [monto, setMonto] = useState('')
+  const [medioPago, setMedioPago] = useState('efectivo')
+  const [saving, setSaving] = useState(false)
+
+  async function confirmar() {
+    if (!sesiones || parseInt(sesiones) <= 0) return alert('Ingresá la cantidad de sesiones')
+    if (!monto || parseFloat(monto) <= 0) return alert('Ingresá el monto total')
+    setSaving(true)
+    await onConfirmar(parseInt(sesiones), parseFloat(monto), medioPago)
+    setSaving(false)
+  }
+
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div className="mt" style={{ marginBottom: 14 }}>Cargar pack de copagos</div>
+        <div className="fg" style={{ marginBottom: 14 }}>
+          <div className="ff">
+            <label>Cantidad de sesiones *</label>
+            <input type="number" min="1" value={sesiones} onChange={e => setSesiones(e.target.value)} autoFocus />
+          </div>
+          <div className="ff">
+            <label>Monto total *</label>
+            <input type="number" min="0" step="0.01" value={monto} onChange={e => setMonto(e.target.value)} placeholder="Ej: 25000" />
+          </div>
+          <div className="ff full">
+            <label>Medio de pago</label>
+            <select value={medioPago} onChange={e => setMedioPago(e.target.value)}>
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 14 }}>
+          Se carga como un solo movimiento en Caja. Las próximas {sesiones || 'N'} sesiones con copago de este paciente se marcan pagadas automáticamente, sin volver a preguntar.
+        </div>
+        <div className="re">
+          <button type="button" className="btn bs" onClick={onCancelar} disabled={saving}>Cancelar</button>
+          <button type="button" className="btn bp" onClick={confirmar} disabled={saving}>{saving ? 'Guardando...' : 'Guardar pack'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcarPagada }) {
   const [editandoKine, setEditandoKine] = useState(false)
   const [loadingK, setLoadingK] = useState(false)
@@ -167,7 +220,11 @@ function FilaTurno({ turno, kines, onEliminarAsistencia, onCambiarKine, onMarcar
         {turno.asistencia === 'asistio' && (
           <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
             <span className="badge bg">Asistió</span>
-            {turno.pagado === true && <span className="badge bg" title={turno.medioPago}>Pagó {turno.monto ? fmtMonto(turno.monto) : ''}</span>}
+            {turno.pagado === true && (
+              <span className="badge bg" title={turno.pagadoConPack ? 'Cubierto por pack de copagos' : turno.medioPago}>
+                {turno.pagadoConPack ? 'Pack' : `Pagó ${turno.monto ? fmtMonto(turno.monto) : ''}`}
+              </span>
+            )}
             {turno.pagado === false && <span className="badge ba">Debe</span>}
             {turno.pagado === false && (
               <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px' }}
@@ -210,6 +267,7 @@ export default function FichaPaciente() {
   const [modoRegistro, setModoRegistro] = useState('normal')
   const [fechaRegistro, setFechaRegistro] = useState(hoy())
   const [modalPago, setModalPago] = useState(false)
+  const [modalPack, setModalPack] = useState(false)
   const [senasActivas, setSenasActivas] = useState([])
 
   useEffect(() => {
@@ -247,18 +305,13 @@ export default function FichaPaciente() {
     cargar()
   }, [id])
 
-  // Intento de registrar sesión — verifica si necesita token, y si requiere copago, antes de registrar
+  // Intento de registrar sesión — verifica si necesita token primero
   function intentarRegistrar() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
     if (!fechaRegistro) return alert('Seleccioná una fecha')
     setModoRegistro('normal')
-    if (necesitaToken(pac.obraSocial)) {
-      setModalToken(true) // mostrar recordatorio
-    } else if (requiereCopagoFn(pac)) {
-      setModalPago(true)
-    } else {
-      registrarSesion()
-    }
+    if (necesitaToken(pac.obraSocial)) setModalToken(true) // mostrar recordatorio
+    else procesarCopagoYRegistrar('normal')
   }
 
   // Registro de asistencia sin sesiones autorizadas todavía — requiere confirmación explícita
@@ -267,21 +320,23 @@ export default function FichaPaciente() {
     if (!fechaRegistro) return alert('Seleccioná una fecha')
     if (!window.confirm('Este paciente todavía no tiene sesiones autorizadas. ¿Registrar la asistencia igual como NO AUTORIZADA? Se descontará del plan apenas se cargue la autorización.')) return
     setModoRegistro('sinAutorizacion')
-    if (necesitaToken(pac.obraSocial)) {
-      setModalToken(true)
-    } else if (requiereCopagoFn(pac)) {
-      setModalPago(true)
-    } else {
-      registrarSesionSinAutorizacion()
-    }
+    if (necesitaToken(pac.obraSocial)) setModalToken(true)
+    else procesarCopagoYRegistrar('sinAutorizacion')
   }
 
-  // Después de confirmar el recordatorio de token, sigue al copago (si aplica) o registra directo
+  // Después de confirmar el recordatorio de token, sigue con el copago (si aplica) o registra directo
   function confirmarToken() {
     setModalToken(false)
-    if (requiereCopagoFn(pac)) { setModalPago(true); return }
-    if (modoRegistro === 'sinAutorizacion') registrarSesionSinAutorizacion()
-    else registrarSesion()
+    procesarCopagoYRegistrar(modoRegistro)
+  }
+
+  // Si el paciente requiere copago: usa el crédito del pack si tiene, si no pregunta pagó/debe.
+  // Si no requiere copago, registra directo.
+  function procesarCopagoYRegistrar(modo) {
+    const registrar = (pagoInfo) => modo === 'sinAutorizacion' ? registrarSesionSinAutorizacion(pagoInfo) : registrarSesion(pagoInfo)
+    if (!requiereCopagoFn(pac)) return registrar()
+    if (tieneCreditoCopago(pac)) return registrar({ pagado: true, usoPack: true })
+    setModalPago(true)
   }
 
   async function registrarSesion(pagoInfo = null) {
@@ -306,7 +361,12 @@ export default function FichaPaciente() {
         creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         ts: serverTimestamp()
       }
-      if (pagoInfo) {
+      let nuevoCopagoUsadas = null
+      if (pagoInfo?.usoPack) {
+        turnoData.pagado = true
+        turnoData.pagadoConPack = true
+        nuevoCopagoUsadas = (pac.copagoPlan?.sesionesUsadas || 0) + 1
+      } else if (pagoInfo) {
         turnoData.pagado = pagoInfo.pagado
         turnoData.monto = pagoInfo.pagado ? pagoInfo.monto : null
         turnoData.medioPago = pagoInfo.pagado ? pagoInfo.medioPago : null
@@ -314,9 +374,12 @@ export default function FichaPaciente() {
       const batch = writeBatch(db)
       const turnoRef = doc(collection(db,'turnos'))
       batch.set(turnoRef, turnoData)
-      batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
+      batch.update(doc(db,'pacientes',id), {
+        'plan.sesionesUsadas': nuevasUsadas,
+        ...(nuevoCopagoUsadas !== null ? { 'copagoPlan.sesionesUsadas': nuevoCopagoUsadas } : {})
+      })
       await batch.commit()
-      if (pagoInfo?.pagado) {
+      if (pagoInfo?.pagado && !pagoInfo.usoPack) {
         await agregarMovimientoCaja({
           tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
           descripcion: `Copago — ${pac.apellido} ${pac.nombre}`,
@@ -333,10 +396,13 @@ export default function FichaPaciente() {
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: nuevasUsadas, asistencia: 'asistio',
-        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago } : {})
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
-      setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
+      setPac(prev => ({
+        ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas },
+        ...(nuevoCopagoUsadas !== null ? { copagoPlan: { ...prev.copagoPlan, sesionesUsadas: nuevoCopagoUsadas } } : {})
+      }))
       invalidarPacs()
       setFechaRegistro(hoy())
       setExito(true)
@@ -368,13 +434,21 @@ export default function FichaPaciente() {
         creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         ts: serverTimestamp()
       }
-      if (pagoInfo) {
+      let nuevoCopagoUsadas = null
+      if (pagoInfo?.usoPack) {
+        turnoData.pagado = true
+        turnoData.pagadoConPack = true
+        nuevoCopagoUsadas = (pac.copagoPlan?.sesionesUsadas || 0) + 1
+      } else if (pagoInfo) {
         turnoData.pagado = pagoInfo.pagado
         turnoData.monto = pagoInfo.pagado ? pagoInfo.monto : null
         turnoData.medioPago = pagoInfo.pagado ? pagoInfo.medioPago : null
       }
       const nuevoRef = await addDoc(collection(db,'turnos'), turnoData)
-      if (pagoInfo?.pagado) {
+      if (nuevoCopagoUsadas !== null) {
+        await updateDoc(doc(db,'pacientes',id), { 'copagoPlan.sesionesUsadas': nuevoCopagoUsadas })
+      }
+      if (pagoInfo?.pagado && !pagoInfo.usoPack) {
         await agregarMovimientoCaja({
           tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
           descripcion: `Copago — ${pac.apellido} ${pac.nombre}`,
@@ -391,9 +465,12 @@ export default function FichaPaciente() {
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: null, autorizado: false, asistencia: 'asistio',
-        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago } : {})
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
+      if (nuevoCopagoUsadas !== null) {
+        setPac(prev => ({ ...prev, copagoPlan: { ...prev.copagoPlan, sesionesUsadas: nuevoCopagoUsadas } }))
+      }
       setFechaRegistro(hoy())
       setExito(true)
       setTimeout(() => setExito(false), 3000)
@@ -483,6 +560,27 @@ export default function FichaPaciente() {
     } catch(err) { console.error(err); alert('Error al registrar el pago') }
   }
 
+  // Carga un pack de copagos prepago — si ya tenía uno con crédito, lo extiende en vez de pisarlo
+  async function cargarPackCopago(sesiones, montoTotal, medioPago) {
+    try {
+      const previo = pac.copagoPlan || { sesionesTotal: 0, sesionesUsadas: 0 }
+      const nuevoPlan = { sesionesTotal: previo.sesionesTotal + sesiones, sesionesUsadas: previo.sesionesUsadas || 0, medioPago, fecha: hoy() }
+      await updateDoc(doc(db,'pacientes',id), { copagoPlan: nuevoPlan })
+      await agregarMovimientoCaja({
+        tipo: medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
+        descripcion: `Pack de ${sesiones} copagos — ${pac.apellido} ${pac.nombre}`,
+        importe: montoTotal,
+        kineId: null, profesionalNombre: null,
+        cargadoPor: user.uid, cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
+        fecha: hoy(), hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      })
+      await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Cargó pack de copagos',
+        `${sesiones} sesiones — ${fmtMonto(montoTotal)} — ${pac.apellido} ${pac.nombre}`)
+      setPac(prev => ({ ...prev, copagoPlan: nuevoPlan }))
+      setModalPack(false)
+    } catch(err) { console.error(err); alert('Error al guardar el pack') }
+  }
+
   async function eliminarAsistencia(turno) {
     try {
       const batch = writeBatch(db)
@@ -560,6 +658,9 @@ export default function FichaPaciente() {
           else if (modoRegistro === 'sinAutorizacion') registrarSesionSinAutorizacion(pagoInfo)
           else registrarSesion(pagoInfo)
         }} onCancelar={() => setModalPago(false)} />
+      )}
+      {modalPack && (
+        <ModalPack onConfirmar={cargarPackCopago} onCancelar={() => setModalPack(false)} />
       )}
 
       <div className="row" style={{ marginBottom: 20 }}>
@@ -668,7 +769,16 @@ export default function FichaPaciente() {
               )}
               {conCopago && (
                 <div style={{ marginTop:14, paddingTop:14, borderTop:'1px solid #eee' }}>
-                  <div style={{ fontSize:12, color:'#888', fontWeight:600, marginBottom:6 }}>Copagos</div>
+                  <div className="row" style={{ justifyContent:'space-between', marginBottom:6 }}>
+                    <div style={{ fontSize:12, color:'#888', fontWeight:600 }}>Copagos</div>
+                    <button className="btn bs bsm" onClick={() => setModalPack(true)}>+ Cargar pack</button>
+                  </div>
+                  {pac.copagoPlan && (
+                    <div style={{ fontSize:13, marginBottom:8 }}>
+                      Pack: <strong>{pac.copagoPlan.sesionesUsadas||0}/{pac.copagoPlan.sesionesTotal}</strong> sesiones usadas
+                      {!tieneCreditoCopago(pac) && <span style={{ color:'var(--na)' }}> — agotado</span>}
+                    </div>
+                  )}
                   {sesionesAdeudadas.length === 0 ? (
                     <div style={{ color:'#888', fontSize:13 }}>Sin copagos adeudados.</div>
                   ) : (
@@ -712,7 +822,9 @@ export default function FichaPaciente() {
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión sin autorización</div>
           <div style={{ fontSize:13, color:'#666', marginBottom:10 }}>
             Este paciente todavía no tiene sesiones autorizadas. Podés registrar que asistió igual — queda marcado en <strong style={{ color:'var(--ro)' }}>rojo</strong> como no autorizado, y se descuenta automáticamente del plan cuando se cargue la autorización.
-            {conCopago && ' Además, al confirmar te va a preguntar si pagó el copago.'}
+            {conCopago && (tieneCreditoCopago(pac)
+              ? ` Además, tiene pack de copago activo — se descuenta solo, sin preguntar.`
+              : ' Además, al confirmar te va a preguntar si pagó el copago.')}
           </div>
           <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
             <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
@@ -736,7 +848,9 @@ export default function FichaPaciente() {
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
             Por defecto es hoy — elegí una fecha anterior si es una sesión que se pasó por alto cargar.
-            {conCopago && ' Este paciente requiere copago: al confirmar te va a preguntar si lo pagó.'}
+            {conCopago && (tieneCreditoCopago(pac)
+              ? ` Tiene pack de copago activo (${pac.copagoPlan.sesionesTotal - (pac.copagoPlan.sesionesUsadas||0)} restantes) — se descuenta solo.`
+              : ' Este paciente requiere copago: al confirmar te va a preguntar si lo pagó.')}
           </div>
           {sesRestantes !== null && sesRestantes <= 0 ? (
             <div className="al alr" style={{ marginBottom: 0 }}>No quedan sesiones disponibles en el plan actual.</div>
