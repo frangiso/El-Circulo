@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn } from '../../utils/helpers'
 
 // Agrega un movimiento de entrada a la caja del mes actual (crea el doc si no existe)
 async function agregarMovimientoCaja(mov) {
@@ -247,13 +247,15 @@ export default function FichaPaciente() {
     cargar()
   }, [id])
 
-  // Intento de registrar sesión — verifica si necesita token primero
+  // Intento de registrar sesión — verifica si necesita token, y si requiere copago, antes de registrar
   function intentarRegistrar() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
     if (!fechaRegistro) return alert('Seleccioná una fecha')
     setModoRegistro('normal')
     if (necesitaToken(pac.obraSocial)) {
       setModalToken(true) // mostrar recordatorio
+    } else if (requiereCopagoFn(pac)) {
+      setModalPago(true)
     } else {
       registrarSesion()
     }
@@ -267,23 +269,32 @@ export default function FichaPaciente() {
     setModoRegistro('sinAutorizacion')
     if (necesitaToken(pac.obraSocial)) {
       setModalToken(true)
+    } else if (requiereCopagoFn(pac)) {
+      setModalPago(true)
     } else {
       registrarSesionSinAutorizacion()
     }
   }
 
-  async function registrarSesion() {
+  // Después de confirmar el recordatorio de token, sigue al copago (si aplica) o registra directo
+  function confirmarToken() {
     setModalToken(false)
+    if (requiereCopagoFn(pac)) { setModalPago(true); return }
+    if (modoRegistro === 'sinAutorizacion') registrarSesionSinAutorizacion()
+    else registrarSesion()
+  }
+
+  async function registrarSesion(pagoInfo = null) {
+    setModalToken(false)
+    setModalPago(false)
     setRegistrando(true)
     try {
       const kine = kines.find(k => k.id === kineSelId)
       const fechaStr = fechaRegistro || hoy()
+      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
       const nuevasUsadas = (pac.plan?.sesionesUsadas || 0) + 1
-      const batch = writeBatch(db)
-      const turnoRef = doc(collection(db,'turnos'))
-      batch.set(turnoRef, {
-        fecha: fechaStr,
-        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      const turnoData = {
+        fecha: fechaStr, hora: horaStr,
         pacienteId: id,
         pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
         pacienteDni: pac.dni || '', obraSocial: pac.obraSocial || '',
@@ -294,15 +305,35 @@ export default function FichaPaciente() {
         creadoPor: user.uid,
         creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         ts: serverTimestamp()
-      })
+      }
+      if (pagoInfo) {
+        turnoData.pagado = pagoInfo.pagado
+        turnoData.monto = pagoInfo.pagado ? pagoInfo.monto : null
+        turnoData.medioPago = pagoInfo.pagado ? pagoInfo.medioPago : null
+      }
+      const batch = writeBatch(db)
+      const turnoRef = doc(collection(db,'turnos'))
+      batch.set(turnoRef, turnoData)
       batch.update(doc(db,'pacientes',id), { 'plan.sesionesUsadas': nuevasUsadas })
       await batch.commit()
+      if (pagoInfo?.pagado) {
+        await agregarMovimientoCaja({
+          tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
+          descripcion: `Copago — ${pac.apellido} ${pac.nombre}`,
+          importe: pagoInfo.monto,
+          kineId: kineSelId,
+          profesionalNombre: kine.apellido + ' ' + kine.nombre,
+          cargadoPor: user.uid,
+          cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+          fecha: hoy(), hora: horaStr
+        })
+      }
       const nuevoT = {
-        id: turnoRef.id, fecha: fechaStr,
-        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        id: turnoRef.id, fecha: fechaStr, hora: horaStr,
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
-        nroSesion: nuevasUsadas, asistencia: 'asistio'
+        nroSesion: nuevasUsadas, asistencia: 'asistio',
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
       setPac(prev => ({ ...prev, plan: { ...prev.plan, sesionesUsadas: nuevasUsadas } }))
@@ -315,15 +346,16 @@ export default function FichaPaciente() {
   }
 
   // Registra asistencia sin plan/sesiones autorizadas — queda marcada en rojo hasta que se cargue el plan
-  async function registrarSesionSinAutorizacion() {
+  async function registrarSesionSinAutorizacion(pagoInfo = null) {
     setModalToken(false)
+    setModalPago(false)
     setRegistrando(true)
     try {
       const kine = kines.find(k => k.id === kineSelId)
       const fechaStr = fechaRegistro || hoy()
-      const nuevoRef = await addDoc(collection(db,'turnos'), {
-        fecha: fechaStr,
-        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const turnoData = {
+        fecha: fechaStr, hora: horaStr,
         pacienteId: id,
         pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
         pacienteDni: pac.dni || '', obraSocial: pac.obraSocial || '',
@@ -335,13 +367,31 @@ export default function FichaPaciente() {
         creadoPor: user.uid,
         creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         ts: serverTimestamp()
-      })
+      }
+      if (pagoInfo) {
+        turnoData.pagado = pagoInfo.pagado
+        turnoData.monto = pagoInfo.pagado ? pagoInfo.monto : null
+        turnoData.medioPago = pagoInfo.pagado ? pagoInfo.medioPago : null
+      }
+      const nuevoRef = await addDoc(collection(db,'turnos'), turnoData)
+      if (pagoInfo?.pagado) {
+        await agregarMovimientoCaja({
+          tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
+          descripcion: `Copago — ${pac.apellido} ${pac.nombre}`,
+          importe: pagoInfo.monto,
+          kineId: kineSelId,
+          profesionalNombre: kine.apellido + ' ' + kine.nombre,
+          cargadoPor: user.uid,
+          cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+          fecha: hoy(), hora: horaStr
+        })
+      }
       const nuevoT = {
-        id: nuevoRef.id, fecha: fechaStr,
-        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        id: nuevoRef.id, fecha: fechaStr, hora: horaStr,
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
-        nroSesion: null, autorizado: false, asistencia: 'asistio'
+        nroSesion: null, autorizado: false, asistencia: 'asistio',
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
       setFechaRegistro(hoy())
@@ -355,6 +405,7 @@ export default function FichaPaciente() {
   function intentarRegistrarParticular() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
     if (!fechaRegistro) return alert('Seleccioná una fecha')
+    setModoRegistro('particular')
     setModalPago(true)
   }
 
@@ -409,16 +460,17 @@ export default function FichaPaciente() {
     setRegistrando(false)
   }
 
-  // Salda una sesión particular que había quedado marcada como "Debe"
+  // Salda una sesión (particular o copago) que había quedado marcada como "Debe"
   async function marcarComoPagada(turno, pagoInfo) {
     try {
       const kine = kines.find(k => k.id === turno.kinesiologoId)
       await updateDoc(doc(db,'turnos',turno.id), {
         pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago
       })
+      const esCopago = turno.nroSesion != null || turno.autorizado === false
       await agregarMovimientoCaja({
         tipo: pagoInfo.medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
-        descripcion: `Sesión particular — ${pac.apellido} ${pac.nombre}`,
+        descripcion: `${esCopago ? 'Copago' : 'Sesión particular'} — ${pac.apellido} ${pac.nombre}`,
         importe: pagoInfo.monto,
         kineId: turno.kinesiologoId || null,
         profesionalNombre: kine ? kine.apellido + ' ' + kine.nombre : turno.kinesiologoNombre,
@@ -489,6 +541,7 @@ export default function FichaPaciente() {
   const sinAutorizarCount = turnos.filter(t => t.autorizado === false).length
   const excedido = plan && (plan.sesionesUsadas || 0) > plan.sesionesTotal
   const esParticular = esPacienteParticular(pac)
+  const conCopago = requiereCopagoFn(pac)
   const sesionesAdeudadas = turnos.filter(t => t.pagado === false)
   const totalAdeudado = sesionesAdeudadas.reduce((a,t) => a + (t.monto||0), 0)
 
@@ -497,12 +550,16 @@ export default function FichaPaciente() {
       {modalToken && (
         <ModalToken
           obraSocial={pac.obraSocial}
-          onConfirmar={() => modoRegistro === 'sinAutorizacion' ? registrarSesionSinAutorizacion() : registrarSesion()}
+          onConfirmar={confirmarToken}
           onCancelar={() => setModalToken(false)}
         />
       )}
       {modalPago && (
-        <ModalPago onConfirmar={registrarSesionParticular} onCancelar={() => setModalPago(false)} />
+        <ModalPago onConfirmar={(pagoInfo) => {
+          if (modoRegistro === 'particular') registrarSesionParticular(pagoInfo)
+          else if (modoRegistro === 'sinAutorizacion') registrarSesionSinAutorizacion(pagoInfo)
+          else registrarSesion(pagoInfo)
+        }} onCancelar={() => setModalPago(false)} />
       )}
 
       <div className="row" style={{ marginBottom: 20 }}>
@@ -570,41 +627,57 @@ export default function FichaPaciente() {
                 ⚠ {sesionesAdeudadas.length} sesión{sesionesAdeudadas.length>1?'es':''} adeudada{sesionesAdeudadas.length>1?'s':''} — {fmtMonto(totalAdeudado)}
               </div>
             )
-          ) : !plan ? (
-            <div style={{ color:'#888', fontSize:13 }}>
-              Sin plan cargado.{' '}
-              <button className="btn bs bsm" onClick={() => navigate(`/pacientes/${id}/editar`)}>Cargar plan</button>
-              {sinAutorizarCount > 0 && (
-                <div style={{ color:'var(--ro)', fontSize:12, marginTop:8 }}>
-                  ⚠ {sinAutorizarCount} sesión{sinAutorizarCount>1?'es':''} sin autorizar registrada{sinAutorizarCount>1?'s':''} — se descuenta{sinAutorizarCount>1?'n':''} del plan al cargarlo.
-                </div>
-              )}
-            </div>
           ) : (
             <>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-                <div className="met">
-                  <div className="met-l">Sesiones</div>
-                  <div style={{ fontSize:20, fontWeight:700, color: excedido ? 'var(--ro)' : 'var(--az)' }}>{plan.sesionesUsadas||0}/{plan.sesionesTotal}</div>
-                  {excedido && <div style={{ fontSize:11, color:'var(--ro)' }}>{plan.sesionesUsadas - plan.sesionesTotal} de más</div>}
+              {!plan ? (
+                <div style={{ color:'#888', fontSize:13 }}>
+                  Sin plan cargado.{' '}
+                  <button className="btn bs bsm" onClick={() => navigate(`/pacientes/${id}/editar`)}>Cargar plan</button>
+                  {sinAutorizarCount > 0 && (
+                    <div style={{ color:'var(--ro)', fontSize:12, marginTop:8 }}>
+                      ⚠ {sinAutorizarCount} sesión{sinAutorizarCount>1?'es':''} sin autorizar registrada{sinAutorizarCount>1?'s':''} — se descuenta{sinAutorizarCount>1?'n':''} del plan al cargarlo.
+                    </div>
+                  )}
                 </div>
-                <div className="met">
-                  <div className="met-l">Días hábiles</div>
-                  <div style={{ fontSize:20, fontWeight:700, color: dias<=0?'var(--ro)':dias<=10?'var(--na)':'var(--ve)' }}>{dias??'—'}</div>
+              ) : (
+                <>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+                    <div className="met">
+                      <div className="met-l">Sesiones</div>
+                      <div style={{ fontSize:20, fontWeight:700, color: excedido ? 'var(--ro)' : 'var(--az)' }}>{plan.sesionesUsadas||0}/{plan.sesionesTotal}</div>
+                      {excedido && <div style={{ fontSize:11, color:'var(--ro)' }}>{plan.sesionesUsadas - plan.sesionesTotal} de más</div>}
+                    </div>
+                    <div className="met">
+                      <div className="met-l">Días hábiles</div>
+                      <div style={{ fontSize:20, fontWeight:700, color: dias<=0?'var(--ro)':dias<=10?'var(--na)':'var(--ve)' }}>{dias??'—'}</div>
+                    </div>
+                  </div>
+                  <table style={{ width:'100%', fontSize:13 }}>
+                    <tbody>
+                      <tr><td style={{ color:'#888', padding:'4px 0', width:'40%' }}>Inicio</td><td style={{ padding:'4px 0' }}>{fmtFecha(plan.fechaInicio)}</td></tr>
+                      <tr><td style={{ color:'#888', padding:'4px 0' }}>Vencimiento</td><td style={{ padding:'4px 0' }}>{fmtFecha(plan.fechaVencimiento)}</td></tr>
+                      <tr><td style={{ color:'#888', padding:'4px 0' }}>Kinesiológo referente</td><td style={{ padding:'4px 0' }}>{kineRefNombre || '—'}</td></tr>
+                      <tr><td style={{ color:'#888', padding:'4px 0' }}>Estado</td><td style={{ padding:'4px 0' }}>
+                        {est==='vencido'&&<span className="badge br">Vencido</span>}
+                        {est==='por-vencer'&&<span className="badge ba">Por vencer</span>}
+                        {est==='vigente'&&<span className="badge bg">Vigente</span>}
+                      </td></tr>
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {conCopago && (
+                <div style={{ marginTop:14, paddingTop:14, borderTop:'1px solid #eee' }}>
+                  <div style={{ fontSize:12, color:'#888', fontWeight:600, marginBottom:6 }}>Copagos</div>
+                  {sesionesAdeudadas.length === 0 ? (
+                    <div style={{ color:'#888', fontSize:13 }}>Sin copagos adeudados.</div>
+                  ) : (
+                    <div className="al alr" style={{ marginBottom:0 }}>
+                      ⚠ {sesionesAdeudadas.length} copago{sesionesAdeudadas.length>1?'s':''} adeudado{sesionesAdeudadas.length>1?'s':''} — {fmtMonto(totalAdeudado)}
+                    </div>
+                  )}
                 </div>
-              </div>
-              <table style={{ width:'100%', fontSize:13 }}>
-                <tbody>
-                  <tr><td style={{ color:'#888', padding:'4px 0', width:'40%' }}>Inicio</td><td style={{ padding:'4px 0' }}>{fmtFecha(plan.fechaInicio)}</td></tr>
-                  <tr><td style={{ color:'#888', padding:'4px 0' }}>Vencimiento</td><td style={{ padding:'4px 0' }}>{fmtFecha(plan.fechaVencimiento)}</td></tr>
-                  <tr><td style={{ color:'#888', padding:'4px 0' }}>Kinesiológo referente</td><td style={{ padding:'4px 0' }}>{kineRefNombre || '—'}</td></tr>
-                  <tr><td style={{ color:'#888', padding:'4px 0' }}>Estado</td><td style={{ padding:'4px 0' }}>
-                    {est==='vencido'&&<span className="badge br">Vencido</span>}
-                    {est==='por-vencer'&&<span className="badge ba">Por vencer</span>}
-                    {est==='vigente'&&<span className="badge bg">Vigente</span>}
-                  </td></tr>
-                </tbody>
-              </table>
+              )}
             </>
           )}
         </div>
@@ -639,6 +712,7 @@ export default function FichaPaciente() {
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión sin autorización</div>
           <div style={{ fontSize:13, color:'#666', marginBottom:10 }}>
             Este paciente todavía no tiene sesiones autorizadas. Podés registrar que asistió igual — queda marcado en <strong style={{ color:'var(--ro)' }}>rojo</strong> como no autorizado, y se descuenta automáticamente del plan cuando se cargue la autorización.
+            {conCopago && ' Además, al confirmar te va a preguntar si pagó el copago.'}
           </div>
           <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
             <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
@@ -662,6 +736,7 @@ export default function FichaPaciente() {
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
             Por defecto es hoy — elegí una fecha anterior si es una sesión que se pasó por alto cargar.
+            {conCopago && ' Este paciente requiere copago: al confirmar te va a preguntar si lo pagó.'}
           </div>
           {sesRestantes !== null && sesRestantes <= 0 ? (
             <div className="al alr" style={{ marginBottom: 0 }}>No quedan sesiones disponibles en el plan actual.</div>

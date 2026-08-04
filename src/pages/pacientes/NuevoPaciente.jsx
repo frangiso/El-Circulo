@@ -4,9 +4,9 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
-import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE, esParticular } from '../../utils/helpers'
+import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE, esParticular, requiereCopago } from '../../utils/helpers'
 
-const INIT = { modalidad:'obraSocial', nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
+const INIT = { modalidad:'obraSocial', requiereCopago:false, nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
 // Busca duplicados SOLO por DNI — pueden existir pacientes con el mismo nombre
 async function buscarDuplicado(nombre, apellido, dni, idExcluir) {
@@ -128,6 +128,15 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
             <label>Diagnóstico</label>
             <input value={f.diagnostico} onChange={e => set('diagnostico', e.target.value)} />
           </div>
+          {f.modalidad !== 'particular' && (
+            <div className="ff full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" id="reqCopago" checked={f.requiereCopago}
+                onChange={e => set('requiereCopago', e.target.checked)} style={{ width: 'auto' }} />
+              <label htmlFor="reqCopago" style={{ marginBottom: 0 }}>
+                Requiere copago (ej: PAMI) — además del plan, cada sesión pregunta si pagó el copago
+              </label>
+            </div>
+          )}
         </div>
       </div>
 
@@ -220,7 +229,7 @@ export function NuevoPaciente() {
         kinesiologoRef: f.kinesiologoRef || null
       } : null
       await addDoc(collection(db,'pacientes'), {
-        modalidad: f.modalidad,
+        modalidad: f.modalidad, requiereCopago: !esParticular && !!f.requiereCopago,
         nombre: f.nombre.trim(), apellido: f.apellido.trim(),
         dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
@@ -264,6 +273,7 @@ export function EditarPaciente() {
       setPlanAnterior(d.plan || null)
       setInicial({
         modalidad: d.modalidad || (esParticular(d) ? 'particular' : 'obraSocial'),
+        requiereCopago: d.requiereCopago === true || requiereCopago(d),
         nombre: d.nombre||'', apellido: d.apellido||'', dni: d.dni||'', telefono: d.telefono||'',
         obraSocial: d.obraSocial||'', nroAfiliado: d.nroAfiliado||'',
         diagnostico: d.diagnostico||'', observaciones: d.observaciones||'',
@@ -319,7 +329,7 @@ export function EditarPaciente() {
 
       const batch = writeBatch(db)
       batch.update(doc(db,'pacientes',id), {
-        modalidad: f.modalidad,
+        modalidad: f.modalidad, requiereCopago: !esParticular && !!f.requiereCopago,
         nombre: f.nombre.trim(), apellido: f.apellido.trim(), dni: f.dni.trim(), telefono: f.telefono.trim(),
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),

@@ -94,3 +94,12 @@ export function esParticular(pac) {
   if (pac.modalidad === 'particular') return true
   return (pac.obraSocial || '').trim().toLowerCase() === 'particular'
 }
+
+// Pacientes que además del plan de sesiones autorizadas pagan un copago por sesión
+// (típicamente PAMI). Se infiere automáticamente si la obra social contiene "pami",
+// o se puede marcar a mano para cualquier otra obra social con el mismo caso.
+export function requiereCopago(pac) {
+  if (!pac) return false
+  if (pac.requiereCopago === true) return true
+  return (pac.obraSocial || '').toLowerCase().includes('pami')
+}
