@@ -11,6 +11,36 @@ const ILupa = () => (
   </svg>
 )
 
+// Modal de motivo — para anular un movimiento (queda registrado, no se borra)
+function ModalMotivo({ titulo, resumen, onConfirmar, onCancelar }) {
+  const [motivo, setMotivo] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function confirmar() {
+    if (!motivo.trim()) return alert('Escribí el motivo')
+    setSaving(true)
+    await onConfirmar(motivo.trim())
+    setSaving(false)
+  }
+
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div className="mt" style={{ marginBottom: 6 }}>{titulo}</div>
+        {resumen && <div style={{ fontSize: 13, color: '#666', marginBottom: 14 }}>{resumen}</div>}
+        <div className="ff" style={{ marginBottom: 14 }}>
+          <label>Motivo *</label>
+          <textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Ej: se cargó por error, monto equivocado" autoFocus />
+        </div>
+        <div className="re">
+          <button type="button" className="btn bs" onClick={onCancelar} disabled={saving}>Cancelar</button>
+          <button type="button" className="btn bd" onClick={confirmar} disabled={saving}>{saving ? 'Guardando...' : 'Confirmar anulación'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Caja() {
   const { user, perfil } = useAuth()
   const { getKines } = useCache()
@@ -24,6 +54,7 @@ export default function Caja() {
   const [fMov, setFM]         = useState({ tipo: 'entrada-efectivo', desc: '', importe: '', kineId: '' })
   const [saving, setSaving]   = useState(false)
   const [filtroDia, setFiltroDia] = useState('')
+  const [anulando, setAnulando] = useState(null) // índice del movimiento a anular
 
   useEffect(() => { getKines().then(setKines) }, [])
 
@@ -37,19 +68,22 @@ export default function Caja() {
     setCarg(false)
   }
 
-  const movs     = docC?.movimientos || []
-  const saldoI   = docC?.saldoInicial || 0
-  const entradas = movs.filter(m => m.tipo === 'entrada-efectivo' || m.tipo === 'entrada-transferencia').reduce((a,m) => a + m.importe, 0)
-  const salidas  = movs.filter(m => m.tipo === 'salida').reduce((a,m) => a + m.importe, 0)
-  const saldoF   = saldoI + entradas - salidas
-  const efectivo = movs.filter(m => m.tipo === 'entrada-efectivo').reduce((a,m) => a + m.importe, 0)
-  const transf   = movs.filter(m => m.tipo === 'entrada-transferencia').reduce((a,m) => a + m.importe, 0)
-  const movsVis  = !filtroDia ? movs : movs.filter(m => m.fecha === filtroDia)
+  const movs      = docC?.movimientos || []
+  const movsVivos = movs.filter(m => !m.anulado)
+  const anuladas  = movs.filter(m => m.anulado)
+  const saldoI    = docC?.saldoInicial || 0
+  const entradas  = movsVivos.filter(m => m.tipo === 'entrada-efectivo' || m.tipo === 'entrada-transferencia').reduce((a,m) => a + m.importe, 0)
+  const salidas   = movsVivos.filter(m => m.tipo === 'salida').reduce((a,m) => a + m.importe, 0)
+  const saldoF    = saldoI + entradas - salidas
+  const efectivo  = movsVivos.filter(m => m.tipo === 'entrada-efectivo').reduce((a,m) => a + m.importe, 0)
+  const transf    = movsVivos.filter(m => m.tipo === 'entrada-transferencia').reduce((a,m) => a + m.importe, 0)
+  const movsVis   = !filtroDia ? movs : movs.filter(m => m.fecha === filtroDia)
 
   function saldoFila(idx) {
     let s = saldoI
     for (let i = 0; i <= idx; i++) {
       const m = movs[i]
+      if (m.anulado) continue
       if (m.tipo === 'entrada-efectivo' || m.tipo === 'entrada-transferencia') s += m.importe
       else if (m.tipo === 'salida') s -= m.importe
     }
@@ -57,9 +91,40 @@ export default function Caja() {
   }
 
   const resumenK = kines.map(k => {
-    const ms = movs.filter(m => m.kineId === k.id && (m.tipo === 'entrada-efectivo' || m.tipo === 'entrada-transferencia'))
+    const ms = movsVivos.filter(m => m.kineId === k.id && (m.tipo === 'entrada-efectivo' || m.tipo === 'entrada-transferencia'))
     return { ...k, ses: ms.length, total: ms.reduce((a,m) => a + m.importe, 0) }
   }).filter(k => k.ses > 0)
+
+  function pedirAnulacion(idx) {
+    const m = movs[idx]
+    if (!window.confirm(`¿Anular este movimiento de ${fmtMonto(m.importe)} — "${m.descripcion}"? Queda registrado en Anulaciones, no se borra.`)) return
+    setAnulando(idx)
+  }
+
+  async function anularMovimiento(idx, motivo) {
+    const m = movs[idx]
+    try {
+      const ref = doc(db, 'caja', 'caja_' + mes)
+      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      // Firestore no permite actualizar un elemento de un array por índice con
+      // notación de punto — hay que reescribir el array completo
+      const nuevosMovs = [...movs]
+      nuevosMovs[idx] = {
+        ...nuevosMovs[idx],
+        anulado: true,
+        anuladoPor: user.uid,
+        anuladoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+        anuladoFecha: new Date().toISOString().split('T')[0],
+        anuladoHora: horaStr,
+        motivoAnulacion: motivo
+      }
+      await updateDoc(ref, { movimientos: nuevosMovs })
+      await escribirLog(user.uid, perfil.apellido + ' ' + perfil.nombre, 'Anuló movimiento de caja',
+        `${fmtMonto(m.importe)} — ${m.descripcion} — ${motivo}`)
+      setDocC(prev => ({ ...prev, movimientos: nuevosMovs }))
+      setAnulando(null)
+    } catch(err) { console.error(err); alert('Error al anular') }
+  }
 
   const setF = (k, v) => setFM(p => ({ ...p, [k]: v }))
 
@@ -138,6 +203,7 @@ export default function Caja() {
           <div className="tabs">
             <button className={'tab ' + (tab === 'movimientos' ? 'on' : '')} onClick={() => setTab('movimientos')}>Movimientos</button>
             <button className={'tab ' + (tab === 'resumen' ? 'on' : '')} onClick={() => setTab('resumen')}>Por profesional</button>
+            <button className={'tab ' + (tab === 'anulaciones' ? 'on' : '')} onClick={() => setTab('anulaciones')}>Anulaciones {anuladas.length > 0 && `(${anuladas.length})`}</button>
           </div>
 
           {tab === 'movimientos' && (
@@ -153,7 +219,7 @@ export default function Caja() {
                 <div className="tw">
                   <table>
                     <thead>
-                      <tr><th>Fecha/Hora</th><th>Tipo</th><th>Profesional</th><th>Detalle</th><th>Importe</th><th>Saldo</th><th>Por</th></tr>
+                      <tr><th>Fecha/Hora</th><th>Tipo</th><th>Profesional</th><th>Detalle</th><th>Importe</th><th>Saldo</th><th>Por</th><th></th></tr>
                     </thead>
                     <tbody>
                       {!filtroDia && saldoI > 0 && (
@@ -164,26 +230,32 @@ export default function Caja() {
                           <td className="cve fw6">{fmtMonto(saldoI)}</td>
                           <td className="fw6">{fmtMonto(saldoI)}</td>
                           <td className="cgr">Sistema</td>
+                          <td></td>
                         </tr>
                       )}
                       {movsVis.length === 0 && (
-                        <tr><td colSpan="7" className="emt">{filtroDia ? 'No hay movimientos para este día' : 'Sin movimientos este mes'}</td></tr>
+                        <tr><td colSpan="8" className="emt">{filtroDia ? 'No hay movimientos para este día' : 'Sin movimientos este mes'}</td></tr>
                       )}
                       {movsVis.map((m, i) => {
                         const esEntrada = m.tipo === 'entrada-efectivo' || m.tipo === 'entrada-transferencia'
+                        const idxReal = movs.indexOf(m)
                         return (
-                          <tr key={i}>
+                          <tr key={i} style={m.anulado ? { opacity: .5, textDecoration: 'line-through' } : undefined}>
                             <td className="cgr" style={{ fontSize: 12 }}>{fmtFecha(m.fecha)} {m.hora}</td>
                             <td>
                               {m.tipo === 'entrada-efectivo' && <span className="badge bg">Efectivo</span>}
                               {m.tipo === 'entrada-transferencia' && <span className="badge bb">Transferencia</span>}
                               {m.tipo === 'salida' && <span className="badge br">Salida</span>}
+                              {m.anulado && <span className="badge br" style={{ marginLeft: 4, textDecoration: 'none' }}>Anulado</span>}
                             </td>
                             <td>{m.profesionalNombre || '—'}</td>
                             <td>{m.descripcion}</td>
                             <td className={esEntrada ? 'cve fw6' : 'cro fw6'}>{esEntrada ? '+' : '-'}{fmtMonto(m.importe)}</td>
-                            <td className="fw6">{fmtMonto(saldoFila(movs.indexOf(m)))}</td>
+                            <td className="fw6">{fmtMonto(saldoFila(idxReal))}</td>
                             <td className="cgr" style={{ fontSize: 11 }}>{m.cargadoPorNombre}</td>
+                            <td style={{ textDecoration: 'none' }}>
+                              {!m.anulado && <button className="btn bd bsm" style={{ fontSize: 10 }} onClick={() => pedirAnulacion(idxReal)}>Anular</button>}
+                            </td>
                           </tr>
                         )
                       })}
@@ -192,7 +264,7 @@ export default function Caja() {
                           <td colSpan="4">Total del mes</td>
                           <td><span className="cve">+{fmtMonto(entradas)}</span> / <span className="cro">-{fmtMonto(salidas)}</span></td>
                           <td className="caz">{fmtMonto(saldoF)}</td>
-                          <td />
+                          <td /><td />
                         </tr>
                       )}
                     </tbody>
@@ -234,7 +306,46 @@ export default function Caja() {
               </div>
             </div>
           )}
+
+          {tab === 'anulaciones' && (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div className="tw">
+                <table>
+                  <thead>
+                    <tr><th>Fecha/Hora</th><th>Tipo</th><th>Detalle</th><th>Importe</th><th>Cargado por</th><th>Anulado por</th><th>Motivo</th></tr>
+                  </thead>
+                  <tbody>
+                    {anuladas.length === 0 && <tr><td colSpan="7" className="emt">Sin anulaciones este mes</td></tr>}
+                    {anuladas.map((m, i) => (
+                      <tr key={i}>
+                        <td className="cgr" style={{ fontSize: 12 }}>{fmtFecha(m.fecha)} {m.hora}</td>
+                        <td>
+                          {m.tipo === 'entrada-efectivo' && <span className="badge bg">Efectivo</span>}
+                          {m.tipo === 'entrada-transferencia' && <span className="badge bb">Transferencia</span>}
+                          {m.tipo === 'salida' && <span className="badge br">Salida</span>}
+                        </td>
+                        <td>{m.descripcion}</td>
+                        <td className="fw6">{fmtMonto(m.importe)}</td>
+                        <td className="cgr" style={{ fontSize: 12 }}>{m.cargadoPorNombre}</td>
+                        <td style={{ fontSize: 12 }}>{m.anuladoPorNombre}<div className="cgr" style={{ fontSize: 11 }}>{fmtFecha(m.anuladoFecha)} {m.anuladoHora}</div></td>
+                        <td style={{ fontSize: 12 }}>{m.motivoAnulacion}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
+      )}
+
+      {anulando !== null && (
+        <ModalMotivo
+          titulo="Anular movimiento"
+          resumen={`${fmtMonto(movs[anulando].importe)} — ${movs[anulando].descripcion}`}
+          onConfirmar={(motivo) => anularMovimiento(anulando, motivo)}
+          onCancelar={() => setAnulando(null)}
+        />
       )}
 
       {modal && (

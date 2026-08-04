@@ -45,6 +45,41 @@ function ModalDevolver({ sena, onConfirmar, onCancelar }) {
   )
 }
 
+// Anular una seña — queda registrada, no se borra
+function ModalAnular({ sena, onConfirmar, onCancelar }) {
+  const [motivo, setMotivo] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function confirmar() {
+    if (!motivo.trim()) return alert('Escribí el motivo de la anulación')
+    setSaving(true)
+    await onConfirmar(motivo.trim())
+    setSaving(false)
+  }
+
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div className="mt" style={{ marginBottom: 6 }}>Anular seña</div>
+        <div style={{ fontSize: 13, color: '#666', marginBottom: 14 }}>
+          {sena.pacienteApellido} {sena.pacienteNombre} — {fmtMonto(sena.monto)}
+        </div>
+        <div className="ff" style={{ marginBottom: 14 }}>
+          <label>Motivo *</label>
+          <textarea value={motivo} onChange={e => setMotivo(e.target.value)}
+            placeholder="Ej: se cargó por error, paciente equivocado" autoFocus />
+        </div>
+        <div className="re">
+          <button type="button" className="btn bs" onClick={onCancelar} disabled={saving}>Cancelar</button>
+          <button type="button" className="btn bd" onClick={confirmar} disabled={saving}>
+            {saving ? 'Guardando...' : 'Confirmar anulación'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Senas() {
   const { user, perfil } = useAuth()
   const { getPacientes } = useCache()
@@ -59,6 +94,8 @@ export default function Senas() {
   const [medioPago, setMedioPago] = useState('efectivo')
   const [saving, setSaving] = useState(false)
   const [devolviendo, setDevolviendo] = useState(null)
+  const [anulando, setAnulando] = useState(null)
+  const [tab, setTab] = useState('lista')
 
   async function cargar() {
     setCarg(true)
@@ -115,8 +152,29 @@ export default function Senas() {
     } catch(err) { console.error(err); alert('Error al devolver') }
   }
 
-  const activas = senas.filter(s => s.estado !== 'devuelta')
-  const devueltas = senas.filter(s => s.estado === 'devuelta')
+  function pedirAnulacion(sena) {
+    if (!window.confirm(`¿Anular la seña de ${sena.pacienteApellido} ${sena.pacienteNombre} por ${fmtMonto(sena.monto)}? Queda registrada en Anulaciones, no se borra.`)) return
+    setAnulando(sena)
+  }
+
+  async function anularSena(sena, motivo) {
+    try {
+      await updateDoc(doc(db,'senas',sena.id), {
+        anulado: true, anuladoPor: user.uid, anuladoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
+        anuladoFecha: hoy(), anuladoHora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        motivoAnulacion: motivo
+      })
+      await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Anuló seña',
+        `${sena.pacienteApellido} ${sena.pacienteNombre} — ${fmtMonto(sena.monto)} — ${motivo}`)
+      setAnulando(null)
+      await cargar()
+    } catch(err) { console.error(err); alert('Error al anular') }
+  }
+
+  const vivas = senas.filter(s => !s.anulado)
+  const activas = vivas.filter(s => s.estado !== 'devuelta')
+  const devueltas = vivas.filter(s => s.estado === 'devuelta')
+  const anuladas = senas.filter(s => s.anulado)
   const totalActivas = activas.reduce((a,s) => a + (s.monto||0), 0)
 
   if (carg) return <div className="sc"><div className="sp" /></div>
@@ -137,42 +195,80 @@ export default function Senas() {
         <div className="met"><div className="met-l">Total a devolver</div><div className="met-v caz">{fmtMonto(totalActivas)}</div></div>
       </div>
 
-      <div className="card">
-        <div className="card-title">Activas ({activas.length})</div>
-        <div className="tw">
-          <table>
-            <thead><tr><th>Fecha</th><th>Paciente</th><th>Monto</th><th>Medio</th><th>Cargada por</th><th></th></tr></thead>
-            <tbody>
-              {activas.length === 0 && <tr><td colSpan="6" className="emt">Sin señas activas</td></tr>}
-              {activas.map(s => (
-                <tr key={s.id}>
-                  <td>{fmtFecha(s.fecha)}</td>
-                  <td className="fw6">{s.pacienteApellido} {s.pacienteNombre}</td>
-                  <td className="cve fw6">{fmtMonto(s.monto)}</td>
-                  <td>{s.medioPago === 'transferencia' ? <span className="badge bb">Transferencia</span> : <span className="badge bg">Efectivo</span>}</td>
-                  <td className="cgr" style={{ fontSize: 12 }}>{s.cargadoPorNombre}</td>
-                  <td><button className="btn bd bsm" onClick={() => setDevolviendo(s)}>Devolver</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="tabs" style={{ marginBottom: 14 }}>
+        <button className={'tab ' + (tab === 'lista' ? 'on' : '')} onClick={() => setTab('lista')}>Señas</button>
+        <button className={'tab ' + (tab === 'anulaciones' ? 'on' : '')} onClick={() => setTab('anulaciones')}>Anulaciones {anuladas.length > 0 && `(${anuladas.length})`}</button>
       </div>
 
-      {devueltas.length > 0 && (
-        <div className="card">
-          <div className="card-title cgr">Devueltas ({devueltas.length})</div>
+      {tab === 'lista' && (
+        <>
+          <div className="card">
+            <div className="card-title">Activas ({activas.length})</div>
+            <div className="tw">
+              <table>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Monto</th><th>Medio</th><th>Cargada por</th><th></th></tr></thead>
+                <tbody>
+                  {activas.length === 0 && <tr><td colSpan="6" className="emt">Sin señas activas</td></tr>}
+                  {activas.map(s => (
+                    <tr key={s.id}>
+                      <td>{fmtFecha(s.fecha)}</td>
+                      <td className="fw6">{s.pacienteApellido} {s.pacienteNombre}</td>
+                      <td className="cve fw6">{fmtMonto(s.monto)}</td>
+                      <td>{s.medioPago === 'transferencia' ? <span className="badge bb">Transferencia</span> : <span className="badge bg">Efectivo</span>}</td>
+                      <td className="cgr" style={{ fontSize: 12 }}>{s.cargadoPorNombre}</td>
+                      <td>
+                        <div className="row" style={{ gap: 4 }}>
+                          <button className="btn bd bsm" onClick={() => setDevolviendo(s)}>Devolver</button>
+                          <button className="btn bs bsm" onClick={() => pedirAnulacion(s)}>Anular</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {devueltas.length > 0 && (
+            <div className="card">
+              <div className="card-title cgr">Devueltas ({devueltas.length})</div>
+              <div className="tw">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Paciente</th><th>Monto</th><th>Devuelta el</th><th>Motivo</th><th></th></tr></thead>
+                  <tbody>
+                    {devueltas.map(s => (
+                      <tr key={s.id} style={{ opacity: .7 }}>
+                        <td>{fmtFecha(s.fecha)}</td>
+                        <td>{s.pacienteApellido} {s.pacienteNombre}</td>
+                        <td>{fmtMonto(s.monto)}</td>
+                        <td>{fmtFecha(s.devueltoFecha)}</td>
+                        <td style={{ fontSize: 12 }}>{s.motivoDevolucion}</td>
+                        <td><button className="btn bs bsm" onClick={() => pedirAnulacion(s)}>Anular</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === 'anulaciones' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="tw">
             <table>
-              <thead><tr><th>Fecha</th><th>Paciente</th><th>Monto</th><th>Devuelta el</th><th>Motivo</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Paciente</th><th>Monto</th><th>Cargada por</th><th>Anulada por</th><th>Motivo</th></tr></thead>
               <tbody>
-                {devueltas.map(s => (
-                  <tr key={s.id} style={{ opacity: .7 }}>
+                {anuladas.length === 0 && <tr><td colSpan="6" className="emt">Sin anulaciones</td></tr>}
+                {anuladas.map(s => (
+                  <tr key={s.id}>
                     <td>{fmtFecha(s.fecha)}</td>
-                    <td>{s.pacienteApellido} {s.pacienteNombre}</td>
+                    <td className="fw6">{s.pacienteApellido} {s.pacienteNombre}</td>
                     <td>{fmtMonto(s.monto)}</td>
-                    <td>{fmtFecha(s.devueltoFecha)}</td>
-                    <td style={{ fontSize: 12 }}>{s.motivoDevolucion}</td>
+                    <td className="cgr" style={{ fontSize: 12 }}>{s.cargadoPorNombre}</td>
+                    <td style={{ fontSize: 12 }}>{s.anuladoPorNombre}<div className="cgr" style={{ fontSize: 11 }}>{fmtFecha(s.anuladoFecha)} {s.anuladoHora}</div></td>
+                    <td style={{ fontSize: 12 }}>{s.motivoAnulacion}</td>
                   </tr>
                 ))}
               </tbody>
@@ -185,6 +281,11 @@ export default function Senas() {
         <ModalDevolver sena={devolviendo}
           onConfirmar={(motivo) => devolver(devolviendo, motivo)}
           onCancelar={() => setDevolviendo(null)} />
+      )}
+      {anulando && (
+        <ModalAnular sena={anulando}
+          onConfirmar={(motivo) => anularSena(anulando, motivo)}
+          onCancelar={() => setAnulando(null)} />
       )}
 
       {modal && (
