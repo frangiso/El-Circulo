@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { collection, addDoc, doc, getDoc, updateDoc, writeBatch, serverTimestamp, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -26,6 +26,8 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
   const [f, setF] = useState(inicial)
   const [duplicado, setDuplicado] = useState(null)
   const [chequando, setChequando] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const enviandoRef = useRef(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
   const pami = f.modalidad !== 'particular' && esPami(f)
@@ -45,13 +47,24 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    // Verificar duplicado antes de guardar
-    const dupes = await buscarDuplicado(f.nombre, f.apellido, f.dni, idExcluir)
-    if (dupes.length > 0) {
-      setDuplicado(dupes[0])
-      return
+    // Guarda sincrónica contra doble click/doble tap: la verificación de duplicado hace
+    // una consulta a Firestore antes de guardar, y en esa espera el botón todavía no
+    // se deshabilita por "saving" (eso lo pone recién onGuardar) — sin este guard,
+    // varios clics seguidos (ej: con conexión lenta) disparan varios guardados en paralelo.
+    if (enviandoRef.current) return
+    enviandoRef.current = true
+    setEnviando(true)
+    try {
+      const dupes = await buscarDuplicado(f.nombre, f.apellido, f.dni, idExcluir)
+      if (dupes.length > 0) {
+        setDuplicado(dupes[0])
+        return
+      }
+      await onGuardar(f)
+    } finally {
+      enviandoRef.current = false
+      setEnviando(false)
     }
-    onGuardar(f)
   }
 
   return (
@@ -208,8 +221,8 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
 
       <div className="re">
         <button type="button" className="btn bs" onClick={() => history.back()}>Cancelar</button>
-        <button type="submit" className="btn bp" disabled={saving || !!duplicado}>
-          {saving ? 'Guardando...' : titulo}
+        <button type="submit" className="btn bp" disabled={saving || enviando || !!duplicado}>
+          {(saving || enviando) ? 'Guardando...' : titulo}
         </button>
       </div>
     </form>
