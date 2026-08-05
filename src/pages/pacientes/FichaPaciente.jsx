@@ -368,7 +368,7 @@ export default function FichaPaciente() {
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
       setSenasActivas(senasSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => !s.anulado))
 
-      const refId = p.plan?.kinesiologoRef
+      const refId = p.plan?.kinesiologoRef || p.kinesiologoRef
       if (refId) {
         const enCache = k.find(x => x.id === refId)
         if (enCache) setKineRefNombre(`${enCache.apellido} ${enCache.nombre}`)
@@ -915,6 +915,9 @@ export default function FichaPaciente() {
               ) : (
                 <div style={{ color:'#888', fontSize:13 }}>Sin pack cargado todavía.</div>
               )}
+              <div style={{ fontSize:13, marginTop:10, paddingTop:10, borderTop:'1px solid #eee', color:'#888' }}>
+                Kinesiológo referente: <strong style={{ color:'#333' }}>{kineRefNombre || '—'}</strong>
+              </div>
             </>
           ) : (
             <>
