@@ -46,6 +46,14 @@ export async function escribirLog(uid, nombre, accion, detalle) {
 
 export function hoy() { return new Date().toISOString().split('T')[0] }
 
+// Hora actual siempre en formato 24hs (HH:MM), sin importar el dispositivo/navegador —
+// toLocaleTimeString con 'es-AR' puede devolver 12hs con a.m./p.m. según el sistema
+// operativo (ej: iOS), lo que rompe cualquier comparación numérica de la hora
+export function horaActual() {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
+
 export function mesActual() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`

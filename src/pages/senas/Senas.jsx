@@ -3,7 +3,7 @@ import { collection, addDoc, doc, updateDoc, getDocs, serverTimestamp } from 'fi
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
-import { escribirLog, fmtMonto, fmtFecha, hoy } from '../../utils/helpers'
+import { escribirLog, fmtMonto, fmtFecha, hoy, horaActual } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -126,7 +126,7 @@ export default function Senas() {
       await addDoc(collection(db, 'senas'), {
         pacienteId: pacSel.id, pacienteNombre: pacSel.nombre, pacienteApellido: pacSel.apellido, pacienteDni: pacSel.dni || '',
         monto: parseFloat(monto), medioPago,
-        fecha: hoy(), hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        fecha: hoy(), hora: horaActual(),
         estado: 'activa',
         cargadoPor: user.uid, cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
         ts: serverTimestamp()
@@ -161,7 +161,7 @@ export default function Senas() {
     try {
       await updateDoc(doc(db,'senas',sena.id), {
         anulado: true, anuladoPor: user.uid, anuladoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
-        anuladoFecha: hoy(), anuladoHora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        anuladoFecha: hoy(), anuladoHora: horaActual(),
         motivoAnulacion: motivo
       })
       await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Anuló seña',
