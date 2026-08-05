@@ -10,11 +10,21 @@ const ILupa = () => (
   </svg>
 )
 
-// Antes de las 14:00 se considera turno de mañana, de ahí en más, de tarde
+// Antes de las 14:00 se considera turno de mañana, de ahí en más, de tarde.
+// La hora guardada debería venir siempre en formato 24hs (ver horaActual() en helpers),
+// pero hay turnos viejos guardados en 12hs con a.m./p.m. (algunos navegadores/dispositivos
+// devuelven eso con toLocaleTimeString aunque se les pida 'es-AR') — se contempla también
+// ese formato para no romper reportes de fechas pasadas.
 function esManana(hora) {
   if (!hora) return true
-  const h = parseInt(hora.split(':')[0], 10)
-  return isNaN(h) || h < 14
+  const s = hora.trim().toLowerCase()
+  const m = s.match(/(\d{1,2}):(\d{2})/)
+  if (!m) return true
+  let h = parseInt(m[1], 10)
+  if (isNaN(h)) return true
+  if (/p\.?\s?m\.?/.test(s) && h !== 12) h += 12
+  if (/a\.?\s?m\.?/.test(s) && h === 12) h = 0
+  return h < 14
 }
 
 // La hora que importa para mañana/tarde es cuándo se marcó la asistencia realmente,

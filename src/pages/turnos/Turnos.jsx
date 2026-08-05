@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, orderBy, doc, writeBatch, deleteDoc,
 import { db } from '../../firebase'
 import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
-import { estadoPlan, diasHabilesRestantes, hoy } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, horaActual } from '../../utils/helpers'
 
 const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
 function necesitaToken(obraSocial) {
@@ -204,7 +204,7 @@ export default function Turnos() {
       // El turno puede tener una hora de agenda distinta a cuándo se marca la asistencia
       // realmente (ej: turno de las 10hs pero se carga la asistencia a la tarde) — guardamos
       // la hora real en que se marcó para que los reportes de mañana/tarde usen esa, no la agendada
-      if (nuevoEst === 'asistio') turnoData.horaAsistencia = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      if (nuevoEst === 'asistio') turnoData.horaAsistencia = horaActual()
       if (!pac?.plan) turnoData.autorizado = nuevoEst === 'asistio' ? false : null
       batch.update(doc(db,'turnos',turno.id), turnoData)
       if (nuevoEst === 'asistio' && pac?.plan) {

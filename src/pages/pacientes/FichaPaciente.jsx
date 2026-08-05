@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, esPami as esPacientePami, escribirLog } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, horaActual, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, esPami as esPacientePami, escribirLog } from '../../utils/helpers'
 
 // ¿Le queda crédito de un pack de copagos prepago?
 function tieneCreditoCopago(pac) {
@@ -41,7 +41,7 @@ async function anularMovimientoCajaDeTurno(turno, uid, nombre) {
       anuladoPor: uid,
       anuladoPorNombre: nombre,
       anuladoFecha: hoy(),
-      anuladoHora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      anuladoHora: horaActual(),
       motivoAnulacion: 'Se anuló la sesión asociada'
     }
     await updateDoc(ref, { movimientos: nuevosMovs })
@@ -426,7 +426,7 @@ export default function FichaPaciente() {
     try {
       const kine = kines.find(k => k.id === kineSelId)
       const fechaStr = fechaRegistro || hoy()
-      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const horaStr = horaActual()
       const nuevasUsadas = (pac.plan?.sesionesUsadas || 0) + 1
       const turnoData = {
         fecha: fechaStr, hora: horaStr,
@@ -502,7 +502,7 @@ export default function FichaPaciente() {
     try {
       const kine = kines.find(k => k.id === kineSelId)
       const fechaStr = fechaRegistro || hoy()
-      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const horaStr = horaActual()
       const turnoData = {
         fecha: fechaStr, hora: horaStr,
         pacienteId: id,
@@ -578,7 +578,7 @@ export default function FichaPaciente() {
     try {
       const kine = kines.find(k => k.id === kineSelId)
       const fechaStr = fechaRegistro || hoy()
-      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const horaStr = horaActual()
       const nuevoRef = await addDoc(collection(db,'turnos'), {
         fecha: fechaStr, hora: horaStr,
         pacienteId: id,
@@ -644,7 +644,7 @@ export default function FichaPaciente() {
         cargadoPor: user.uid,
         cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         fecha: hoy(),
-        hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+        hora: horaActual(),
         turnoId: turno.id
       })
       setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, cajaMovMes: mesMov } : t))
@@ -663,7 +663,7 @@ export default function FichaPaciente() {
         importe: montoTotal,
         kineId: null, profesionalNombre: null,
         cargadoPor: user.uid, cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
-        fecha: hoy(), hora: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+        fecha: hoy(), hora: horaActual()
       })
       await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Cargó pack de copagos',
         `${sesiones} sesiones — ${fmtMonto(montoTotal)} — ${pac.apellido} ${pac.nombre}`)
@@ -682,7 +682,7 @@ export default function FichaPaciente() {
     try {
       const kine = kines.find(k => k.id === kineSelId)
       const fechaStr = fechaRegistro || hoy()
-      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const horaStr = horaActual()
       const planBase = planOverride || pac.copagoPlan
       const nuevoCopagoUsadas = (planBase?.sesionesUsadas || 0) + 1
       const turnoData = {
@@ -736,7 +736,7 @@ export default function FichaPaciente() {
   // de Caja que haya generado esa sesión puntual, si generó alguno
   async function anularTurno(turno, motivo) {
     try {
-      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const horaStr = horaActual()
       const updates = {
         anulado: true, anuladoPor: user.uid, anuladoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
         anuladoFecha: hoy(), anuladoHora: horaStr, motivoAnulacion: motivo

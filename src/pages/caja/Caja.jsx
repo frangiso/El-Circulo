@@ -3,7 +3,7 @@ import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from 'fir
 import { db } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
-import { mesActual, labelMes, getMeses, fmtMonto, escribirLog, fmtFecha } from '../../utils/helpers'
+import { mesActual, labelMes, getMeses, fmtMonto, escribirLog, fmtFecha, horaActual } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -105,7 +105,7 @@ export default function Caja() {
     const m = movs[idx]
     try {
       const ref = doc(db, 'caja', 'caja_' + mes)
-      const horaStr = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})
+      const horaStr = horaActual()
       // Firestore no permite actualizar un elemento de un array por índice con
       // notación de punto — hay que reescribir el array completo
       const nuevosMovs = [...movs]
@@ -142,7 +142,7 @@ export default function Caja() {
         cargadoPor: user.uid,
         cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         fecha: new Date().toISOString().split('T')[0],
-        hora: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+        hora: horaActual()
       }
       const ref = doc(db, 'caja', 'caja_' + mes)
       if (!docC) {
