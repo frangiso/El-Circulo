@@ -42,9 +42,8 @@ export function CacheProvider({ children }) {
     return set('pacs', snap.docs.map(d=>({id:d.id,...d.data()})))
   }, [])
 
-  // Los pacientes ya no se archivan automáticamente por vencimiento de plan — se
-  // reactiva (una sola vez, corre 1 vez por día vía config/limpieza) cualquiera que
-  // haya quedado archivado por esa lógica anterior, para que todos queden activos
+  // Limpieza diaria — reservada para futuras tareas de mantenimiento (corre 1 vez
+  // por día, vía config/limpieza). Hoy no hace nada por sí sola.
   const limpiar = useCallback(async () => {
     if (get('limpiezaOk')) return
     try {
@@ -54,15 +53,33 @@ export function CacheProvider({ children }) {
       if (configSnap.exists() && configSnap.data().fecha === hoyStr) {
         set('limpiezaOk', true); return
       }
+      await setDoc(configRef, { fecha: hoyStr })
+    } catch(e) { console.error('Limpieza:',e) }
+    set('limpiezaOk', true)
+  }, [])
+
+  // Migración de una sola vez: los pacientes ya no se archivan automáticamente por
+  // vencimiento de plan, así que se reactiva cualquiera que haya quedado archivado
+  // por esa lógica vieja. Usa su propio candado (independiente del de la limpieza
+  // diaria) para que corra apenas se despliega el cambio, sin esperar a que cambie
+  // la fecha del candado diario si ese ya se había usado hoy.
+  const reactivarPacientes = useCallback(async () => {
+    if (get('reactivacionOk')) return
+    try {
+      const configRef = doc(db,'config','reactivarPacientes')
+      const configSnap = await getDoc(configRef)
+      if (configSnap.exists() && configSnap.data().hecho === true) {
+        set('reactivacionOk', true); return
+      }
       const snapArchivados = await getDocs(query(collection(db,'pacientes'), where('archivado','==',true)))
       if (snapArchivados.docs.length > 0) {
         const batch = writeBatch(db)
         snapArchivados.docs.forEach(d => batch.update(doc(db,'pacientes',d.id), { archivado: false, fechaArchivado: null }))
         await batch.commit(); del('pacs')
       }
-      await setDoc(configRef, { fecha: hoyStr })
-    } catch(e) { console.error('Limpieza:',e) }
-    set('limpiezaOk', true)
+      await setDoc(configRef, { hecho: true })
+    } catch(e) { console.error('Reactivación de pacientes:',e) }
+    set('reactivacionOk', true)
   }, [])
 
   const invalidarPacs  = () => del('pacs')
@@ -72,7 +89,7 @@ export function CacheProvider({ children }) {
   return (
     <Ctx.Provider value={{
       getUsuarios, getKines, getObras,
-      getPacientes, limpiar,
+      getPacientes, limpiar, reactivarPacientes,
       invalidarPacs, invalidarUsers, invalidarObras
     }}>
       {children}
