@@ -27,7 +27,7 @@ function LimpiezaSilenciosa() {
   const { limpiar } = useCache()
   useEffect(() => {
     if (user && perfil?.estado === 'activo') {
-      limpiar(user.uid, `${perfil.apellido} ${perfil.nombre}`)
+      limpiar()
     }
   }, [user?.uid])
   return null

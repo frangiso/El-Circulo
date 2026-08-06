@@ -22,34 +22,16 @@ function PlanBadge({ p }) {
 
 export default function Pacientes() {
   const navigate = useNavigate()
-  const { getPacientes, getArchivados } = useCache()
+  const { getPacientes } = useCache()
   const [todos, setTodos]         = useState([])
-  const [archivados, setArchivados] = useState([])
-  const [archCargados, setArchCarg] = useState(false)
-  const [tab, setTab]             = useState('activos')
   const [busq, setBusq]           = useState('')
   const [filtroOS, setFiltroOS]   = useState('')
   const [buscado, setBuscado]     = useState(false)
-  const [cargArch, setCargArch]   = useState(false)
   const timer = useRef(null)
 
   useEffect(() => {
     getPacientes().then(setTodos)
   }, [])
-
-  async function irArchivados() {
-    setTab('archivados')
-    setBusq('')
-    setFiltroOS('')
-    setBuscado(false)
-    if (!archCargados) {
-      setCargArch(true)
-      const d = await getArchivados()
-      setArchivados(d)
-      setArchCarg(true)
-      setCargArch(false)
-    }
-  }
 
   function onBusqChange(v) {
     setBusq(v)
@@ -64,10 +46,9 @@ export default function Pacientes() {
     setBuscado(v.length > 0 || busq.trim().length > 0)
   }
 
-  const lista = tab === 'activos' ? todos : archivados
   const obras = [...new Set(todos.map(p => p.obraSocial).filter(Boolean))].sort()
 
-  const visibles = !buscado ? [] : lista.filter(p => {
+  const visibles = !buscado ? [] : todos.filter(p => {
     const txt = (p.apellido + ' ' + p.nombre + ' ' + (p.dni || '')).toLowerCase()
     const matchB = txt.includes(busq.toLowerCase())
     const matchOS = filtroOS ? p.obraSocial === filtroOS : true
@@ -80,27 +61,6 @@ export default function Pacientes() {
         <div className="ptitle">Pacientes</div>
         <button className="btn bp" onClick={() => navigate('/pacientes/nuevo')}>+ Nuevo paciente</button>
       </div>
-
-      <div className="tabs">
-        <button
-          className={'tab ' + (tab === 'activos' ? 'on' : '')}
-          onClick={() => { setTab('activos'); setBusq(''); setFiltroOS(''); setBuscado(false) }}
-        >
-          Activos ({todos.length})
-        </button>
-        <button
-          className={'tab ' + (tab === 'archivados' ? 'on' : '')}
-          onClick={irArchivados}
-        >
-          Archivados {archCargados ? '(' + archivados.length + ')' : ''}
-        </button>
-      </div>
-
-      {tab === 'archivados' && (
-        <div className="al alb">
-          Pacientes con plan vencido. Para reactivar, entrá a la ficha y cargá un plan nuevo.
-        </div>
-      )}
 
       <div className="filtros">
         <div className="sw" style={{ flex: 1, minWidth: 200 }}>
@@ -121,9 +81,7 @@ export default function Pacientes() {
       </div>
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {cargArch ? (
-          <div className="sc"><div className="sp" /></div>
-        ) : !buscado ? (
+        {!buscado ? (
           <div className="empty-search">
             <ILupa />
             <p>Buscá un paciente para ver resultados</p>
@@ -149,7 +107,6 @@ export default function Pacientes() {
                 {visibles.map(p => (
                   <tr
                     key={p.id}
-                    style={{ opacity: tab === 'archivados' ? 0.7 : 1 }}
                     onClick={() => navigate('/pacientes/' + p.id)}
                   >
                     <td><strong>{p.apellido}</strong> {p.nombre}</td>

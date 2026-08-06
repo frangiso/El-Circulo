@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, useCallback } from 'react'
 import { collection, getDocs, query, where, orderBy,
   doc, writeBatch, getDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase'
-import { OBRAS_BASE, estadoPlan, fechaHaceNMeses, escribirLog, hoy, esParticular, esPami } from '../utils/helpers'
+import { OBRAS_BASE, hoy } from '../utils/helpers'
 
 const Ctx = createContext()
 export const useCache = () => useContext(Ctx)
@@ -42,16 +42,10 @@ export function CacheProvider({ children }) {
     return set('pacs', snap.docs.map(d=>({id:d.id,...d.data()})))
   }, [])
 
-  const getArchivados = useCallback(async (force=false) => {
-    if (!force) { const c=get('arch'); if(c) return c }
-    const snap = await getDocs(query(
-      collection(db,'pacientes'), where('archivado','==',true), orderBy('apellido')
-    ))
-    return set('arch', snap.docs.map(d=>({id:d.id,...d.data()})))
-  }, [])
-
-  // Limpieza 1 vez por día — verifica doc config/limpieza
-  const limpiar = useCallback(async (uid, nombre) => {
+  // Los pacientes ya no se archivan automáticamente por vencimiento de plan — se
+  // reactiva (una sola vez, corre 1 vez por día vía config/limpieza) cualquiera que
+  // haya quedado archivado por esa lógica anterior, para que todos queden activos
+  const limpiar = useCallback(async () => {
     if (get('limpiezaOk')) return
     try {
       const hoyStr = hoy()
@@ -60,34 +54,25 @@ export function CacheProvider({ children }) {
       if (configSnap.exists() && configSnap.data().fecha === hoyStr) {
         set('limpiezaOk', true); return
       }
-      const activos = await getPacientes(true)
-      const aArchivar = activos.filter(p => !esParticular(p) && !esPami(p) && p.plan && estadoPlan(p.plan)==='vencido')
-      if (aArchivar.length > 0) {
+      const snapArchivados = await getDocs(query(collection(db,'pacientes'), where('archivado','==',true)))
+      if (snapArchivados.docs.length > 0) {
         const batch = writeBatch(db)
-        aArchivar.forEach(p => batch.update(doc(db,'pacientes',p.id), {archivado:true, fechaArchivado:hoyStr}))
+        snapArchivados.docs.forEach(d => batch.update(doc(db,'pacientes',d.id), { archivado: false, fechaArchivado: null }))
         await batch.commit(); del('pacs')
       }
-      const limite = fechaHaceNMeses(12)
-      const snapViejos = await getDocs(query(collection(db,'pacientes'), where('archivado','==',true), where('fechaArchivado','<=',limite)))
-      if (snapViejos.docs.length > 0) {
-        const batch2 = writeBatch(db)
-        snapViejos.docs.forEach(d => batch2.delete(doc(db,'pacientes',d.id)))
-        await batch2.commit(); del('arch')
-        await escribirLog(uid, nombre, 'Borrado automático', `${snapViejos.docs.length} paciente(s) eliminados por inactividad +12 meses`)
-      }
-      await setDoc(configRef, { fecha: hoyStr, ejecutadoPor: nombre })
+      await setDoc(configRef, { fecha: hoyStr })
     } catch(e) { console.error('Limpieza:',e) }
     set('limpiezaOk', true)
-  }, [getPacientes])
+  }, [])
 
-  const invalidarPacs  = () => del('pacs','arch')
+  const invalidarPacs  = () => del('pacs')
   const invalidarUsers = () => del('usuarios','kines')
   const invalidarObras = () => del('obras')
 
   return (
     <Ctx.Provider value={{
       getUsuarios, getKines, getObras,
-      getPacientes, getArchivados, limpiar,
+      getPacientes, limpiar,
       invalidarPacs, invalidarUsers, invalidarObras
     }}>
       {children}

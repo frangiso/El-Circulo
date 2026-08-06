@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useCache } from '../../context/AppCache'
-import { calcVenc, estadoPlan, escribirLog, OBRAS_BASE, esParticular, requiereCopago, esPami } from '../../utils/helpers'
+import { calcVenc, escribirLog, OBRAS_BASE, esParticular, requiereCopago, esPami } from '../../utils/helpers'
 
 const INIT = { modalidad:'obraSocial', requiereCopago:false, nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
@@ -19,7 +19,7 @@ async function buscarDuplicado(nombre, apellido, dni, idExcluir) {
   return resultados
 }
 
-function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
+function Form({ inicial, titulo, onGuardar, saving, idExcluir }) {
   const { getKines, getObras } = useCache()
   const [kines, setKines] = useState([])
   const [obras, setObras] = useState(OBRAS_BASE)
@@ -189,21 +189,12 @@ function Form({ inicial, titulo, onGuardar, saving, eraArch, idExcluir }) {
 
       {f.modalidad !== 'particular' && !pami && (
         <div className="card">
-          <div className="card-title">
-            Plan de sesiones{' '}
-            {eraArch && <span style={{ color: 'var(--na)', fontSize: 12, fontWeight: 400 }}>(cargá uno nuevo para reactivar)</span>}
-          </div>
+          <div className="card-title">Plan de sesiones</div>
           <div className="fg">
             <div className="ff">
               <label>Total sesiones autorizadas</label>
               <input type="number" min="1" value={f.sesionesTotal} onChange={e => set('sesionesTotal', e.target.value)} />
             </div>
-            {eraArch && (
-              <div className="ff">
-                <label>Sesiones ya realizadas</label>
-                <input type="number" min="0" value={f.sesionesUsadas} onChange={e => set('sesionesUsadas', e.target.value)} />
-              </div>
-            )}
             <div className="ff">
               <label>Fecha de inicio del plan</label>
               <input type="date" value={f.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
@@ -285,7 +276,7 @@ export function NuevoPaciente() {
         <div className="ptitle">Nuevo paciente</div>
       </div>
       <div className="al alb">El plan se puede cargar ahora o después desde la ficha.</div>
-      <Form inicial={INIT} titulo="Guardar paciente" onGuardar={guardar} saving={saving} eraArch={false} idExcluir={null} />
+      <Form inicial={INIT} titulo="Guardar paciente" onGuardar={guardar} saving={saving} idExcluir={null} />
     </div>
   )
 }
@@ -296,14 +287,13 @@ export function EditarPaciente() {
   const { user, perfil } = useAuth()
   const { invalidarPacs, invalidarObras } = useCache()
   const [inicial, setInicial] = useState(null)
-  const [eraArch, setEraArch] = useState(false)
   const [saving, setSaving]   = useState(false)
   const [planAnterior, setPlanAnterior] = useState(null)
 
   useEffect(() => {
     getDoc(doc(db,'pacientes',id)).then(s => {
       if (!s.exists()) { navigate('/pacientes'); return }
-      const d = s.data(); setEraArch(d.archivado === true)
+      const d = s.data()
       setPlanAnterior(d.plan || null)
       setInicial({
         modalidad: d.modalidad || (esParticular(d) ? 'particular' : 'obraSocial'),
@@ -362,7 +352,6 @@ export function EditarPaciente() {
         fechaInicio: f.fechaInicio||null, fechaVencimiento: venc,
         kinesiologoRef: f.kinesiologoRef||null
       } : null
-      const nuevoEst = plan ? estadoPlan(plan) : 'sin-plan'
 
       const batch = writeBatch(db)
       batch.update(doc(db,'pacientes',id), {
@@ -372,7 +361,7 @@ export function EditarPaciente() {
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
         ordenFecha: f.ordenFecha || null, ordenDetalle: f.ordenDetalle.trim(),
         kinesiologoRef: !esParticular ? (f.kinesiologoRef || null) : null,
-        plan, archivado: nuevoEst === 'vencido', actualizadoEn: serverTimestamp()
+        plan, actualizadoEn: serverTimestamp()
       })
       let numero = parseInt(f.sesionesUsadas)||0
       pendientes.forEach(t => {
@@ -385,8 +374,7 @@ export function EditarPaciente() {
       await batch.commit()
 
       invalidarPacs()
-      const acc = eraArch && nuevoEst !== 'vencido' ? 'Reactivó paciente' : 'Edición paciente'
-      await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, acc, `${f.apellido} ${f.nombre}`)
+      await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Edición paciente', `${f.apellido} ${f.nombre}`)
       if (pendientes.length > 0) {
         await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Autorizó sesiones pendientes',
           `${pendientes.length} sesión${pendientes.length>1?'es':''} de ${f.apellido} ${f.nombre}`)
@@ -406,10 +394,9 @@ export function EditarPaciente() {
     <div style={{ maxWidth: 700 }}>
       <div className="row" style={{ marginBottom: 20 }}>
         <button className="btn bs bsm" onClick={() => navigate(-1)}>← Volver</button>
-        <div className="ptitle">{eraArch ? 'Reactivar paciente' : 'Editar paciente'}</div>
+        <div className="ptitle">Editar paciente</div>
       </div>
-      {eraArch && <div className="al ala">Paciente archivado. Cargá un plan nuevo con fecha válida para reactivarlo.</div>}
-      <Form inicial={inicial} titulo="Guardar cambios" onGuardar={guardar} saving={saving} eraArch={eraArch} idExcluir={id} />
+      <Form inicial={inicial} titulo="Guardar cambios" onGuardar={guardar} saving={saving} idExcluir={id} />
     </div>
   )
 }
