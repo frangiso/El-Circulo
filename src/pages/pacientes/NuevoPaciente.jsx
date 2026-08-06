@@ -27,10 +27,20 @@ function Form({ inicial, titulo, onGuardar, saving, idExcluir }) {
   const [duplicado, setDuplicado] = useState(null)
   const [chequando, setChequando] = useState(false)
   const [enviando, setEnviando] = useState(false)
+  const [sumar, setSumar] = useState('')
   const enviandoRef = useRef(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
   const pami = f.modalidad !== 'particular' && esPami(f)
+
+  // Suma sesiones al total que ya tenía cargado, en vez de tener que recalcular
+  // el número final a mano (ej: tenía 10, le autorizan 5 más → sumar 5 en vez de escribir 15)
+  function sumarSesiones() {
+    const n = parseInt(sumar)
+    if (!n || n <= 0) return
+    set('sesionesTotal', (parseInt(f.sesionesTotal) || 0) + n)
+    setSumar('')
+  }
 
   useEffect(() => {
     Promise.all([getKines(), getObras()]).then(([k,o]) => { setKines(k); setObras(o) })
@@ -195,6 +205,16 @@ function Form({ inicial, titulo, onGuardar, saving, idExcluir }) {
               <label>Total sesiones autorizadas</label>
               <input type="number" min="1" value={f.sesionesTotal} onChange={e => set('sesionesTotal', e.target.value)} />
             </div>
+            {idExcluir && !!inicial.sesionesTotal && (
+              <div className="ff">
+                <label>Sumar sesiones al plan</label>
+                <div className="row" style={{ gap: 6 }}>
+                  <input type="number" min="1" value={sumar} onChange={e => setSumar(e.target.value)} placeholder="Ej: 5" style={{ flex: 1 }} />
+                  <button type="button" className="btn bs bsm" onClick={sumarSesiones}>+ Sumar</button>
+                </div>
+                <span className="hint">Se suma al total de arriba — ej: tenía 10, le autorizan 5 más, sumás 5 y queda en 15</span>
+              </div>
+            )}
             <div className="ff">
               <label>Fecha de inicio del plan</label>
               <input type="date" value={f.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
