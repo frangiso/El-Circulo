@@ -360,10 +360,6 @@ export default function FichaPaciente() {
       ])
       if (!snap.exists()) { navigate('/pacientes'); return }
       const p = { id: snap.id, ...snap.data() }
-      if (!esPacienteParticular(p) && !esPacientePami(p) && !p.archivado && p.plan && estadoPlan(p.plan) === 'vencido') {
-        await updateDoc(doc(db,'pacientes',id), { archivado: true, fechaArchivado: hoy() })
-        p.archivado = true; invalidarPacs()
-      }
       setPac(p); setKines(k)
       setTurnos(tsSnap.docs.map(d => ({ id: d.id, ...d.data() })))
       setSenasActivas(senasSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => !s.anulado))
@@ -803,7 +799,6 @@ export default function FichaPaciente() {
 
   const { plan } = pac
   const est  = plan ? estadoPlan(plan) : 'sin-plan'
-  const arch = pac.archivado === true
   const dias = plan?.fechaVencimiento ? diasHabilesRestantes(plan.fechaVencimiento) : null
   const ini  = ((pac.nombre?.[0]||'') + (pac.apellido?.[0]||'')).toUpperCase()
   const sesRestantes = plan ? (plan.sesionesTotal - (plan.sesionesUsadas || 0)) : null
@@ -840,17 +835,16 @@ export default function FichaPaciente() {
         <button className="btn bs bsm" onClick={() => navigate('/pacientes')}>← Volver</button>
         <div className="ptitle" style={{ flex: 1 }}>Ficha de paciente</div>
         <button className="btn bs bsm" onClick={() => navigate(`/pacientes/${id}/editar`)}>
-          {arch ? 'Reactivar / Editar' : 'Editar'}
+          Editar
         </button>
-        {!arch && <button className="btn bp bsm" onClick={() => navigate('/turnos/nuevo')}>+ Turno</button>}
+        <button className="btn bp bsm" onClick={() => navigate('/turnos/nuevo')}>+ Turno</button>
         <button className="btn bd bsm" onClick={eliminarPaciente} disabled={eliminando}>
           {eliminando ? 'Eliminando...' : 'Eliminar'}
         </button>
       </div>
 
-      {arch && <div className="al ala">Paciente archivado. Hacé clic en "Reactivar / Editar" para cargarlo de nuevo.</div>}
-      {est === 'por-vencer' && !arch && <div className="al ala">⚠ El plan vence en {dias} días hábiles.</div>}
-      {est === 'vencido' && !arch && <div className="al alr">⚠ El plan está vencido.</div>}
+      {est === 'por-vencer' && <div className="al ala">⚠ El plan vence en {dias} días hábiles.</div>}
+      {est === 'vencido' && <div className="al alr">⚠ El plan está vencido.</div>}
       {conToken && (
         <div className="al alb">
           🔑 Este paciente tiene <strong>{pac.obraSocial}</strong> — recordá pedirle el <strong>token</strong> antes de cada sesión.
@@ -866,11 +860,10 @@ export default function FichaPaciente() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div className="card">
           <div className="row" style={{ marginBottom: 14 }}>
-            <div className="av avl" style={{ opacity: arch ? .5 : 1 }}>{ini}</div>
+            <div className="av avl">{ini}</div>
             <div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>{pac.apellido} {pac.nombre}</div>
               <div style={{ fontSize: 12, color: '#888' }}>DNI {pac.dni || '—'}</div>
-              {arch && <span className="badge bk" style={{ marginTop: 4 }}>Archivado</span>}
             </div>
           </div>
           <div className="div" />
@@ -985,7 +978,7 @@ export default function FichaPaciente() {
       </div>
 
       {/* Registro sesión — paciente particular (paga por sesión) */}
-      {!arch && esParticular && (
+      {esParticular && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
@@ -1008,7 +1001,7 @@ export default function FichaPaciente() {
       )}
 
       {/* Registro sesión — paciente PAMI (funciona como particular pero paga por packs) */}
-      {!arch && pami && (
+      {pami && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
@@ -1033,7 +1026,7 @@ export default function FichaPaciente() {
       )}
 
       {/* Registro sin autorización — paciente sin plan cargado todavía */}
-      {!arch && !esParticular && !pami && !plan && (
+      {!esParticular && !pami && !plan && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--ro)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión sin autorización</div>
           <div style={{ fontSize:13, color:'#666', marginBottom:10 }}>
@@ -1059,7 +1052,7 @@ export default function FichaPaciente() {
       )}
 
       {/* Registro rápido */}
-      {!arch && !esParticular && !pami && plan && est !== 'vencido' && (
+      {!esParticular && !pami && plan && est !== 'vencido' && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
