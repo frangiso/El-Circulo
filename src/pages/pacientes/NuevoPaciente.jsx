@@ -28,18 +28,23 @@ function Form({ inicial, titulo, onGuardar, saving, idExcluir }) {
   const [chequando, setChequando] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [sumar, setSumar] = useState('')
+  const [fechaOrdenNueva, setFechaOrdenNueva] = useState('')
   const enviandoRef = useRef(false)
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
   const pami = f.modalidad !== 'particular' && esPami(f)
 
   // Suma sesiones al total que ya tenía cargado, en vez de tener que recalcular
-  // el número final a mano (ej: tenía 10, le autorizan 5 más → sumar 5 en vez de escribir 15)
+  // el número final a mano (ej: tenía 10, le autorizan 5 más → sumar 5 en vez de escribir 15).
+  // Si además viene con la fecha de la orden nueva, actualiza el inicio del plan —
+  // el vencimiento se recalcula solo a 45 días hábiles desde esa fecha.
   function sumarSesiones() {
     const n = parseInt(sumar)
     if (!n || n <= 0) return
     set('sesionesTotal', (parseInt(f.sesionesTotal) || 0) + n)
+    if (fechaOrdenNueva) set('fechaInicio', fechaOrdenNueva)
     setSumar('')
+    setFechaOrdenNueva('')
   }
 
   useEffect(() => {
@@ -206,13 +211,15 @@ function Form({ inicial, titulo, onGuardar, saving, idExcluir }) {
               <input type="number" min="1" value={f.sesionesTotal} onChange={e => set('sesionesTotal', e.target.value)} />
             </div>
             {idExcluir && !!inicial.sesionesTotal && (
-              <div className="ff">
-                <label>Sumar sesiones al plan</label>
-                <div className="row" style={{ gap: 6 }}>
-                  <input type="number" min="1" value={sumar} onChange={e => setSumar(e.target.value)} placeholder="Ej: 5" style={{ flex: 1 }} />
+              <div className="ff full">
+                <label>Sumar sesiones al plan (nueva orden)</label>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  <input type="number" min="1" value={sumar} onChange={e => setSumar(e.target.value)} placeholder="Sesiones a sumar, ej: 5" style={{ flex: 1, minWidth: 140 }} />
+                  <input type="date" value={fechaOrdenNueva} onChange={e => setFechaOrdenNueva(e.target.value)}
+                    title="Fecha de la nueva orden (opcional)" style={{ minWidth: 160 }} />
                   <button type="button" className="btn bs bsm" onClick={sumarSesiones}>+ Sumar</button>
                 </div>
-                <span className="hint">Se suma al total de arriba — ej: tenía 10, le autorizan 5 más, sumás 5 y queda en 15</span>
+                <span className="hint">Suma la cantidad al total de arriba. Si además ponés la fecha de la orden nueva, actualiza el inicio del plan de abajo (el vencimiento se recalcula solo a 45 días hábiles desde ahí).</span>
               </div>
             )}
             <div className="ff">

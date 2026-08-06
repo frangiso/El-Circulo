@@ -1052,7 +1052,7 @@ export default function FichaPaciente() {
       )}
 
       {/* Registro rápido */}
-      {!esParticular && !pami && plan && est !== 'vencido' && (
+      {!esParticular && !pami && plan && (
         <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--az)' }}>
           <div className="card-title" style={{ marginBottom: 10 }}>Registrar sesión</div>
           <div style={{ fontSize:12, color:'#888', marginBottom:10 }}>
@@ -1061,23 +1061,24 @@ export default function FichaPaciente() {
               ? ` Tiene pack de copago activo (${pac.copagoPlan.sesionesTotal - (pac.copagoPlan.sesionesUsadas||0)} restantes) — se descuenta solo.`
               : ' Este paciente requiere copago: al confirmar te va a preguntar si lo pagó.')}
           </div>
-          {sesRestantes !== null && sesRestantes <= 0 ? (
-            <div className="al alr" style={{ marginBottom: 0 }}>No quedan sesiones disponibles en el plan actual.</div>
-          ) : (
-            <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
-              <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
-                style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
-              <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
-                style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
-                <option value="">Seleccioná kinesiológo...</option>
-                {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
-              </select>
-              <button className="btn bp" onClick={intentarRegistrar} disabled={registrando || !kineSelId || !fechaRegistro} style={{ minWidth:160 }}>
-                {registrando ? 'Registrando...' : conToken ? '🔑 ✓ Marcar asistencia' : '✓ Marcar asistencia'}
-              </button>
-              {exito && <div className="badge bg" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada — quedan {sesRestantes - 1} sesiones</div>}
+          {sesRestantes !== null && sesRestantes <= 0 && (
+            <div className="al alr" style={{ marginBottom: 10 }}>
+              ⚠ No le quedan sesiones disponibles en el plan actual — si igual asistió, se puede registrar igual. Queda en negativo hasta que se cargue una orden nueva.
             </div>
           )}
+          <div className="row" style={{ flexWrap:'wrap', gap:10 }}>
+            <input type="date" value={fechaRegistro} max={hoy()} onChange={e => setFechaRegistro(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13 }} />
+            <select value={kineSelId} onChange={e => setKineSelId(e.target.value)}
+              style={{ padding:'8px 12px', border:'1px solid #ddd', borderRadius:8, fontSize:13, flex:1, minWidth:200 }}>
+              <option value="">Seleccioná kinesiológo...</option>
+              {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+            </select>
+            <button className="btn bp" onClick={intentarRegistrar} disabled={registrando || !kineSelId || !fechaRegistro} style={{ minWidth:160 }}>
+              {registrando ? 'Registrando...' : conToken ? '🔑 ✓ Marcar asistencia' : '✓ Marcar asistencia'}
+            </button>
+            {exito && <div className="badge bg" style={{ padding:'8px 14px', fontSize:13 }}>✓ Sesión registrada{sesRestantes !== null ? ` — quedan ${sesRestantes - 1} sesiones` : ''}</div>}
+          </div>
           {sesRestantes !== null && sesRestantes <= 3 && sesRestantes > 0 && (
             <div style={{ fontSize:12, color:'var(--na)', marginTop:8 }}>⚠ Quedan solo {sesRestantes} sesión{sesRestantes>1?'es':''} en el plan</div>
           )}
