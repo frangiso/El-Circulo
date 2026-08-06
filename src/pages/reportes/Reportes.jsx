@@ -80,8 +80,10 @@ export default function Reportes() {
   function onDiaChange(f) { setFechaDia(f); resetVista() }
 
   // Todos los turnos del período — incluye los cargados desde ficha de paciente
-  // y los cargados desde panel de turnos con asistencia marcada
-  const turnosConAsistencia = turnos.filter(t => t.asistencia === 'asistio')
+  // y los cargados desde panel de turnos con asistencia marcada. Se excluyen las
+  // sesiones anuladas: siguen con asistencia:'asistio' (no se borran, quedan de
+  // auditoría) pero no deben sumar en las estadísticas del kinesiológo
+  const turnosConAsistencia = turnos.filter(t => t.asistencia === 'asistio' && !t.anulado)
 
   // Agrupar por kinesiologoId — funciona con kines de colección 'kinesiologos'
   // Y también con kines de 'usuarios' (los viejos) por si quedaron registros
@@ -135,7 +137,7 @@ export default function Reportes() {
   const total = porKine.reduce((a, k) => a + k.sesiones, 0)
   const totalTurnos = turnos.length
   const totalFaltas = turnos.filter(t => t.asistencia === 'falto').length
-  const totalPendientes = turnos.filter(t => !t.asistencia || t.asistencia === 'pendiente').length
+  const totalPendientes = turnos.filter(t => (!t.asistencia || t.asistencia === 'pendiente') && !t.anulado).length
 
   const tituloPeriodo = vista === 'dia' ? fmtFecha(fechaDia) : labelMes(mes)
 
@@ -303,11 +305,17 @@ export default function Reportes() {
                           <td>{t.kinesiologoNombre || '—'}</td>
                           <td>{t.obraSocial ? <span className="badge bb">{t.obraSocial}</span> : '—'}</td>
                           <td>
-                            {t.asistencia === 'asistio' && <span className="badge bg">Asistió</span>}
-                            {t.asistencia === 'falto' && <span className="badge br">Faltó</span>}
-                            {(!t.asistencia || t.asistencia === 'pendiente') && <span className="badge bk">Pendiente</span>}
-                            {t.pagado === true && <span className="badge bg" style={{ marginLeft: 4 }}>Pagó</span>}
-                            {t.pagado === false && <span className="badge ba" style={{ marginLeft: 4 }}>Debe</span>}
+                            {t.anulado ? (
+                              <span className="badge br" title={`${t.motivoAnulacion || ''} — ${t.anuladoPorNombre || ''}`}>Anulada</span>
+                            ) : (
+                              <>
+                                {t.asistencia === 'asistio' && <span className="badge bg">Asistió</span>}
+                                {t.asistencia === 'falto' && <span className="badge br">Faltó</span>}
+                                {(!t.asistencia || t.asistencia === 'pendiente') && <span className="badge bk">Pendiente</span>}
+                                {t.pagado === true && <span className="badge bg" style={{ marginLeft: 4 }}>Pagó</span>}
+                                {t.pagado === false && <span className="badge ba" style={{ marginLeft: 4 }}>Debe</span>}
+                              </>
+                            )}
                           </td>
                         </tr>
                       ))}
