@@ -3,13 +3,7 @@ import { collection, query, where, getDocs, orderBy, doc, writeBatch, deleteDoc,
 import { db } from '../../firebase'
 import { useNavigate } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
-import { estadoPlan, diasHabilesRestantes, hoy, horaActual } from '../../utils/helpers'
-
-const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
-function necesitaToken(obraSocial) {
-  if (!obraSocial) return false
-  return OBRAS_TOKEN.some(o => obraSocial.toLowerCase().includes(o.toLowerCase()))
-}
+import { estadoPlan, diasHabilesRestantes, hoy, horaActual, necesitaToken } from '../../utils/helpers'
 
 const ILupa = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

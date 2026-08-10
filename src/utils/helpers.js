@@ -119,3 +119,18 @@ export function esPami(pac) {
   if (!pac) return false
   return (pac.obraSocial || '').toLowerCase().includes('pami')
 }
+
+// Saca acentos/diacríticos para comparar texto sin importar cómo se haya tipeado
+// (ej: "JERARQUICOS" sin acento vs "Jerárquicos" con acento deberían matchear)
+function sinAcentos(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+// Obras sociales que piden token de autorización antes de cada sesión
+export const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
+
+export function necesitaToken(obraSocial) {
+  if (!obraSocial) return false
+  const norm = sinAcentos(obraSocial)
+  return OBRAS_TOKEN.some(o => norm.includes(sinAcentos(o)))
+}
