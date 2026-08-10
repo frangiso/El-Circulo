@@ -4,7 +4,7 @@ import { db } from '../../firebase'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useCache } from '../../context/AppCache'
 import { useAuth } from '../../context/AuthContext'
-import { estadoPlan, diasHabilesRestantes, hoy, horaActual, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, esPami as esPacientePami, escribirLog } from '../../utils/helpers'
+import { estadoPlan, diasHabilesRestantes, hoy, horaActual, mesActual, fmtMonto, esParticular as esPacienteParticular, requiereCopago as requiereCopagoFn, esPami as esPacientePami, escribirLog, necesitaToken } from '../../utils/helpers'
 
 // ¿Le queda crédito de un pack de copagos prepago?
 function tieneCreditoCopago(pac) {
@@ -51,13 +51,6 @@ async function anularMovimientoCajaDeTurno(turno, uid, nombre) {
 function fmtFecha(s) {
   if (!s) return '—'
   const [y,m,d] = s.split('-'); return `${d}/${m}/${y}`
-}
-
-const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
-
-function necesitaToken(obraSocial) {
-  if (!obraSocial) return false
-  return OBRAS_TOKEN.some(o => obraSocial.toLowerCase().includes(o.toLowerCase()))
 }
 
 // Modal recordatorio de token
