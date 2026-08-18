@@ -880,13 +880,18 @@ export default function FichaPaciente() {
         <div className="card">
           <div className="card-title">{(esParticular || pami) ? 'Cuenta corriente' : 'Estado del plan'}</div>
           {esParticular ? (
-            sesionesAdeudadas.length === 0 ? (
-              <div style={{ color:'#888', fontSize:13 }}>Sin sesiones adeudadas.</div>
-            ) : (
-              <div className="al alr" style={{ marginBottom:0 }}>
-                ⚠ {sesionesAdeudadas.length} sesión{sesionesAdeudadas.length>1?'es':''} adeudada{sesionesAdeudadas.length>1?'s':''} — {fmtMonto(totalAdeudado)}
+            <>
+              {sesionesAdeudadas.length === 0 ? (
+                <div style={{ color:'#888', fontSize:13 }}>Sin sesiones adeudadas.</div>
+              ) : (
+                <div className="al alr" style={{ marginBottom:0 }}>
+                  ⚠ {sesionesAdeudadas.length} sesión{sesionesAdeudadas.length>1?'es':''} adeudada{sesionesAdeudadas.length>1?'s':''} — {fmtMonto(totalAdeudado)}
+                </div>
+              )}
+              <div style={{ fontSize:13, marginTop:10, paddingTop:10, borderTop:'1px solid #eee', color:'#888' }}>
+                Kinesiológo referente: <strong style={{ color:'#333' }}>{kineRefNombre || '—'}</strong>
               </div>
-            )
+            </>
           ) : pami ? (
             <>
               <div className="row" style={{ justifyContent:'space-between', marginBottom:6 }}>

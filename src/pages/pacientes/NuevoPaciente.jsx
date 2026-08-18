@@ -158,20 +158,20 @@ function Form({ inicial, titulo, onGuardar, saving, idExcluir }) {
             <input value={f.diagnostico} onChange={e => set('diagnostico', e.target.value)} />
           </div>
           {pami && (
-            <>
-              <div className="ff full">
-                <div className="al alb" style={{ marginBottom: 0 }}>
-                  PAMI funciona como un paciente particular: sin plan ni vencimiento, nunca se archiva. La diferencia es que en vez de pagar sesión por sesión, se le cargan packs prepagos de varias sesiones juntas (5, 10, las que sean) desde la ficha.
-                </div>
+            <div className="ff full">
+              <div className="al alb" style={{ marginBottom: 0 }}>
+                PAMI funciona como un paciente particular: sin plan ni vencimiento, nunca se archiva. La diferencia es que en vez de pagar sesión por sesión, se le cargan packs prepagos de varias sesiones juntas (5, 10, las que sean) desde la ficha.
               </div>
-              <div className="ff full">
-                <label>Kinesiológo referente</label>
-                <select value={f.kinesiologoRef} onChange={e => set('kinesiologoRef', e.target.value)}>
-                  <option value="">Sin asignar</option>
-                  {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
-                </select>
-              </div>
-            </>
+            </div>
+          )}
+          {(pami || f.modalidad === 'particular') && (
+            <div className="ff full">
+              <label>Kinesiológo referente</label>
+              <select value={f.kinesiologoRef} onChange={e => set('kinesiologoRef', e.target.value)}>
+                <option value="">Sin asignar</option>
+                {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
+              </select>
+            </div>
           )}
           {f.modalidad !== 'particular' && !pami && (
             <div className="ff full" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -285,8 +285,9 @@ export function NuevoPaciente() {
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
         ordenFecha: f.ordenFecha || null, ordenDetalle: f.ordenDetalle.trim(),
         // Se guarda también afuera del plan (además de adentro, si hay plan) porque
-        // PAMI y los pacientes sin plan todavía no tienen "plan" donde anidarlo
-        kinesiologoRef: !esParticular ? (f.kinesiologoRef || null) : null,
+        // PAMI y particular no tienen "plan" donde anidarlo, y aun así puede haber
+        // un kinesiológo de referencia asignado
+        kinesiologoRef: f.kinesiologoRef || null,
         plan, archivado: false, creadoPor: user.uid, creadoEn: serverTimestamp()
       })
       invalidarPacs()
@@ -387,7 +388,7 @@ export function EditarPaciente() {
         obraSocial: f.obraSocial.trim(), nroAfiliado: f.nroAfiliado.trim(),
         diagnostico: f.diagnostico.trim(), observaciones: f.observaciones.trim(),
         ordenFecha: f.ordenFecha || null, ordenDetalle: f.ordenDetalle.trim(),
-        kinesiologoRef: !esParticular ? (f.kinesiologoRef || null) : null,
+        kinesiologoRef: f.kinesiologoRef || null,
         plan, actualizadoEn: serverTimestamp()
       })
       let numero = parseInt(f.sesionesUsadas)||0
