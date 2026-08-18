@@ -17,6 +17,7 @@ import EditarPaciente from './pages/pacientes/EditarPaciente'
 import Caja from './pages/caja/Caja'
 import Senas from './pages/senas/Senas'
 import Reportes from './pages/reportes/Reportes'
+import Ordenes from './pages/ordenes/Ordenes'
 import Usuarios from './pages/usuarios/Usuarios'
 import Kinesiologos from './pages/kinesiologos/Kinesiologos'
 import ObrasSociales from './pages/obrasSociales/ObrasSociales'
@@ -68,6 +69,7 @@ function Rutas() {
           <Route path="caja" element={<Caja />} />
           <Route path="senas" element={<Senas />} />
           <Route path="reportes" element={<Reportes />} />
+          <Route path="ordenes" element={<Ordenes />} />
           <Route path="logs" element={<Logs />} />
           <Route path="kinesiologos" element={<Kinesiologos />} />
           <Route path="obras-sociales" element={<ObrasSociales />} />
