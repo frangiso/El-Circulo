@@ -100,9 +100,13 @@ export default function Ordenes() {
                       {o.obraSocial ? <span className="badge bb">{o.obraSocial}</span> : '—'}
                       {o.esPami && <span className="badge bk" style={{ marginLeft: 4 }}>Pack PAMI</span>}
                     </td>
-                    <td>{o.sesiones}{o.esPami ? ` — ${fmtMonto(o.monto)}` : ''}</td>
+                    <td>{o.sesiones}{o.esPami && o.monto ? ` — ${fmtMonto(o.monto)}` : ''}</td>
                     <td>{o.detalle || '—'}</td>
-                    <td>{o.cargadoPorNombre || '—'}</td>
+                    <td>
+                      {o.migrada
+                        ? <span className="badge bk" title="Importada del dato de orden que ya tenía cargado el paciente, antes de que existiera esta pestaña">Migrada</span>
+                        : (o.cargadoPorNombre || '—')}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -1,8 +1,8 @@
 import { createContext, useContext, useRef, useCallback } from 'react'
 import { collection, getDocs, query, where, orderBy,
-  doc, writeBatch, getDoc, setDoc } from 'firebase/firestore'
+  doc, writeBatch, getDoc, setDoc, addDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase'
-import { OBRAS_BASE, hoy } from '../utils/helpers'
+import { OBRAS_BASE, hoy, esParticular, esPami } from '../utils/helpers'
 
 const Ctx = createContext()
 export const useCache = () => useContext(Ctx)
@@ -82,6 +82,40 @@ export function CacheProvider({ children }) {
     set('reactivacionOk', true)
   }, [])
 
+  // Migración de una sola vez: antes de que existiera la pestaña de Órdenes, cada
+  // paciente solo guardaba el dato de su última orden (fecha + detalle) suelto en
+  // la ficha. Se importa esa última orden como primer registro en la colección
+  // nueva 'ordenes' para que no arranque vacía — no reconstruye el historial
+  // completo (nunca se guardó una por una), solo la última conocida de cada uno.
+  const migrarOrdenes = useCallback(async () => {
+    if (get('migracionOrdenesOk')) return
+    try {
+      const configRef = doc(db,'config','migracionOrdenes')
+      const configSnap = await getDoc(configRef)
+      if (configSnap.exists() && configSnap.data().hecho === true) {
+        set('migracionOrdenesOk', true); return
+      }
+      const snap = await getDocs(collection(db,'pacientes'))
+      const candidatos = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => p.ordenFecha && !esParticular(p))
+      for (const p of candidatos) {
+        const pami = esPami(p)
+        const sesiones = pami ? (p.copagoPlan?.sesionesTotal || 0) : (p.plan?.sesionesTotal || 0)
+        if (!sesiones) continue
+        await addDoc(collection(db,'ordenes'), {
+          pacienteId: p.id, pacienteNombre: p.nombre, pacienteApellido: p.apellido,
+          pacienteDni: p.dni || '', obraSocial: p.obraSocial || '',
+          fechaEntrega: p.ordenFecha, sesiones, detalle: p.ordenDetalle || '',
+          esPami: pami, migrada: true,
+          cargadoPor: 'sistema', cargadoPorNombre: 'Migración automática', creadoEn: serverTimestamp()
+        })
+      }
+      await setDoc(configRef, { hecho: true })
+    } catch(e) { console.error('Migración de órdenes:',e) }
+    set('migracionOrdenesOk', true)
+  }, [])
+
   const invalidarPacs  = () => del('pacs')
   const invalidarUsers = () => del('usuarios','kines')
   const invalidarObras = () => del('obras')
@@ -89,7 +123,7 @@ export function CacheProvider({ children }) {
   return (
     <Ctx.Provider value={{
       getUsuarios, getKines, getObras,
-      getPacientes, limpiar, reactivarPacientes,
+      getPacientes, limpiar, reactivarPacientes, migrarOrdenes,
       invalidarPacs, invalidarUsers, invalidarObras
     }}>
       {children}
