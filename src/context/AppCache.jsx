@@ -7,6 +7,7 @@ import { OBRAS_BASE, hoy, esParticular, esPami } from '../utils/helpers'
 const Ctx = createContext()
 export const useCache = () => useContext(Ctx)
 const TTL = 30 * 60 * 1000 // 30 minutos
+const OBRAS_BASE_NORM = OBRAS_BASE.map(o => o.trim().toLowerCase())
 
 export function CacheProvider({ children }) {
   const s = useRef({})
@@ -116,6 +117,42 @@ export function CacheProvider({ children }) {
     set('migracionOrdenesOk', true)
   }, [])
 
+  // Migración de una sola vez: antes, al cargar la obra social de un paciente solo
+  // se chequeaba si ya estaba en la lista base del sistema (no contra las que ya
+  // habían agregado otras secretarias), así que la misma obra social terminaba
+  // creándose repetida cada vez que alguien la volvía a tipear. Se borran los
+  // duplicados (sin importar mayúsculas/minúsculas ni espacios) dejando una sola
+  // fila por nombre, y se sacan las que ya venían incluidas en la lista base.
+  const dedupeObras = useCallback(async () => {
+    if (get('dedupeObrasOk')) return
+    try {
+      const configRef = doc(db,'config','dedupeObras')
+      const configSnap = await getDoc(configRef)
+      if (configSnap.exists() && configSnap.data().hecho === true) {
+        set('dedupeObrasOk', true); return
+      }
+      const snap = await getDocs(collection(db,'obrasSociales'))
+      const vistos = new Set()
+      const aBorrar = []
+      snap.docs.forEach(d => {
+        const norm = (d.data().nombre || '').trim().toLowerCase()
+        if (!norm || OBRAS_BASE_NORM.includes(norm) || vistos.has(norm)) {
+          aBorrar.push(d.id)
+        } else {
+          vistos.add(norm)
+        }
+      })
+      if (aBorrar.length > 0) {
+        const batch = writeBatch(db)
+        aBorrar.forEach(id => batch.delete(doc(db,'obrasSociales',id)))
+        await batch.commit()
+        del('obras')
+      }
+      await setDoc(configRef, { hecho: true })
+    } catch(e) { console.error('Dedupe obras sociales:',e) }
+    set('dedupeObrasOk', true)
+  }, [])
+
   const invalidarPacs  = () => del('pacs')
   const invalidarUsers = () => del('usuarios','kines')
   const invalidarObras = () => del('obras')
@@ -123,7 +160,7 @@ export function CacheProvider({ children }) {
   return (
     <Ctx.Provider value={{
       getUsuarios, getKines, getObras,
-      getPacientes, limpiar, reactivarPacientes, migrarOrdenes,
+      getPacientes, limpiar, reactivarPacientes, migrarOrdenes, dedupeObras,
       invalidarPacs, invalidarUsers, invalidarObras
     }}>
       {children}
