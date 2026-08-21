@@ -643,13 +643,19 @@ export default function FichaPaciente() {
   // Carga un pack de copagos prepago — si ya tenía uno con crédito, lo extiende en vez de pisarlo.
   // Si el paciente venía con sesiones sueltas marcadas "Debe" (vino y no pagó todavía),
   // el pack nuevo las salda primero con el crédito recién cargado, de más viejas a más
-  // nuevas, en vez de dejarlas sueltas esperando un cobro aparte.
+  // nuevas, en vez de dejarlas sueltas esperando un cobro aparte. Para PAMI además
+  // cuentan las que hayan quedado "sin autorizar" (autorizado:false) — ese estado es
+  // de antes de que existiera el modelo de packs y no tiene sentido para PAMI, que no
+  // maneja autorización de plan. Para el resto (obra social con copago) no se toca
+  // "autorizado": ahí sí es un estado real, separado del pago del copago.
   async function cargarPackCopago(sesiones, montoTotal, medioPago) {
     try {
+      const pamiPac = esPacientePami(pac)
       const previo = pac.copagoPlan || { sesionesTotal: 0, sesionesUsadas: 0 }
       const sesionesUsadasPrevias = previo.sesionesUsadas || 0
       const disponibles = (previo.sesionesTotal + sesiones) - sesionesUsadasPrevias
-      const deuda = turnos.filter(t => !t.anulado && t.pagado === false)
+      const deuda = turnos.filter(t => !t.anulado && t.asistencia === 'asistio' && t.pagado !== true &&
+        (pamiPac || t.pagado === false))
         .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
       const aSaldar = deuda.slice(0, Math.max(0, disponibles))
 
@@ -658,7 +664,9 @@ export default function FichaPaciente() {
       const batch = writeBatch(db)
       batch.update(doc(db,'pacientes',id), { copagoPlan: nuevoPlan })
       aSaldar.forEach(t => {
-        batch.update(doc(db,'turnos',t.id), { pagado: true, pagadoConPack: true })
+        batch.update(doc(db,'turnos',t.id), pamiPac
+          ? { pagado: true, pagadoConPack: true, autorizado: true }
+          : { pagado: true, pagadoConPack: true })
       })
       await batch.commit()
 
@@ -675,7 +683,9 @@ export default function FichaPaciente() {
         + (aSaldar.length > 0 ? ` — saldó ${aSaldar.length} sesión${aSaldar.length>1?'es':''} adeudada${aSaldar.length>1?'s':''}` : ''))
       if (aSaldar.length > 0) {
         const idsSaldados = new Set(aSaldar.map(t => t.id))
-        setTurnos(prev => prev.map(t => idsSaldados.has(t.id) ? { ...t, pagado: true, pagadoConPack: true } : t))
+        setTurnos(prev => prev.map(t => idsSaldados.has(t.id)
+          ? { ...t, pagado: true, pagadoConPack: true, ...(pamiPac ? { autorizado: true } : {}) }
+          : t))
       }
       setPac(prev => ({ ...prev, copagoPlan: nuevoPlan }))
       setModalPack(false)

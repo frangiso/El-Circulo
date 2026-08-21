@@ -155,23 +155,30 @@ export function CacheProvider({ children }) {
 
   // Migración de una sola vez: aplica retroactivamente el arreglo de "el pack de
   // copagos salda primero la deuda vieja" a los pacientes que ya tenían crédito de
-  // pack cargado y sesiones sueltas marcadas "Debe" de antes de ese arreglo.
+  // pack cargado y sesiones sueltas pendientes de antes de ese arreglo. Para PAMI
+  // cuenta como pendiente tanto "Debe" (pagado:false) como "sin autorizar"
+  // (autorizado:false, un estado de antes del modelo de packs que no tiene sentido
+  // para PAMI). Para el resto de copago solo cuenta "Debe" — ahí "autorizado" es un
+  // estado real del plan de obra social, separado del pago del copago.
+  // v2: la primera versión de esta migración solo buscaba pagado==false, que no
+  // encuentra los turnos viejos donde ese campo directamente no existe (el caso de
+  // "sin autorizar" en PAMI) — usa su propio candado para volver a correr.
   const saldarDeudaConPacksExistentes = useCallback(async () => {
-    if (get('saldoDeudaPacksOk')) return
+    if (get('saldoDeudaPacksV2Ok')) return
     try {
-      const configRef = doc(db,'config','saldarDeudaPacks')
+      const configRef = doc(db,'config','saldarDeudaPacksV2')
       const configSnap = await getDoc(configRef)
       if (configSnap.exists() && configSnap.data().hecho === true) {
-        set('saldoDeudaPacksOk', true); return
+        set('saldoDeudaPacksV2Ok', true); return
       }
       const [pacsSnap, deudaSnap] = await Promise.all([
         getDocs(collection(db,'pacientes')),
-        getDocs(query(collection(db,'turnos'), where('pagado','==',false)))
+        getDocs(query(collection(db,'turnos'), where('asistencia','==','asistio')))
       ])
       const deudaPorPaciente = {}
       deudaSnap.docs.forEach(d => {
         const t = { id: d.id, ...d.data() }
-        if (t.anulado) return
+        if (t.anulado || t.pagado === true) return
         if (!deudaPorPaciente[t.pacienteId]) deudaPorPaciente[t.pacienteId] = []
         deudaPorPaciente[t.pacienteId].push(t)
       })
@@ -183,11 +190,16 @@ export function CacheProvider({ children }) {
         if (!plan) return
         const disponibles = (plan.sesionesTotal || 0) - (plan.sesionesUsadas || 0)
         if (disponibles <= 0) return
-        const deuda = (deudaPorPaciente[p.id] || []).sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
+        const pami = esPami(p)
+        const deuda = (deudaPorPaciente[p.id] || [])
+          .filter(t => pami || t.pagado === false)
+          .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
         if (deuda.length === 0) return
         const aSaldar = deuda.slice(0, disponibles)
         batch.update(doc(db,'pacientes',p.id), { 'copagoPlan.sesionesUsadas': (plan.sesionesUsadas || 0) + aSaldar.length })
-        aSaldar.forEach(t => batch.update(doc(db,'turnos',t.id), { pagado: true, pagadoConPack: true }))
+        aSaldar.forEach(t => batch.update(doc(db,'turnos',t.id), pami
+          ? { pagado: true, pagadoConPack: true, autorizado: true }
+          : { pagado: true, pagadoConPack: true }))
         huboMovimientos = true
       })
       if (huboMovimientos) {
@@ -196,7 +208,7 @@ export function CacheProvider({ children }) {
       }
       await setDoc(configRef, { hecho: true })
     } catch(e) { console.error('Saldar deuda con packs existentes:',e) }
-    set('saldoDeudaPacksOk', true)
+    set('saldoDeudaPacksV2Ok', true)
   }, [])
 
   const invalidarPacs  = () => del('pacs')
