@@ -163,7 +163,7 @@ function ModalPack({ onConfirmar, onCancelar }) {
           </div>
         </div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 14 }}>
-          Se carga como un solo movimiento en Caja. Las próximas {sesiones || 'N'} sesiones con copago de este paciente se marcan pagadas automáticamente, sin volver a preguntar.
+          Se carga como un solo movimiento en Caja. Si el paciente tiene sesiones sueltas marcadas "Debe", se saldan primero con este crédito (de más viejas a más nuevas) — el resto queda para las próximas sesiones, que se marcan pagadas automáticamente sin volver a preguntar.
         </div>
         <div className="re">
           <button type="button" className="btn bs" onClick={onCancelar} disabled={saving}>Cancelar</button>
@@ -640,12 +640,28 @@ export default function FichaPaciente() {
     } catch(err) { console.error(err); alert('Error al registrar el pago') }
   }
 
-  // Carga un pack de copagos prepago — si ya tenía uno con crédito, lo extiende en vez de pisarlo
+  // Carga un pack de copagos prepago — si ya tenía uno con crédito, lo extiende en vez de pisarlo.
+  // Si el paciente venía con sesiones sueltas marcadas "Debe" (vino y no pagó todavía),
+  // el pack nuevo las salda primero con el crédito recién cargado, de más viejas a más
+  // nuevas, en vez de dejarlas sueltas esperando un cobro aparte.
   async function cargarPackCopago(sesiones, montoTotal, medioPago) {
     try {
       const previo = pac.copagoPlan || { sesionesTotal: 0, sesionesUsadas: 0 }
-      const nuevoPlan = { sesionesTotal: previo.sesionesTotal + sesiones, sesionesUsadas: previo.sesionesUsadas || 0, medioPago, fecha: hoy() }
-      await updateDoc(doc(db,'pacientes',id), { copagoPlan: nuevoPlan })
+      const sesionesUsadasPrevias = previo.sesionesUsadas || 0
+      const disponibles = (previo.sesionesTotal + sesiones) - sesionesUsadasPrevias
+      const deuda = turnos.filter(t => !t.anulado && t.pagado === false)
+        .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
+      const aSaldar = deuda.slice(0, Math.max(0, disponibles))
+
+      const nuevoPlan = { sesionesTotal: previo.sesionesTotal + sesiones, sesionesUsadas: sesionesUsadasPrevias + aSaldar.length, medioPago, fecha: hoy() }
+
+      const batch = writeBatch(db)
+      batch.update(doc(db,'pacientes',id), { copagoPlan: nuevoPlan })
+      aSaldar.forEach(t => {
+        batch.update(doc(db,'turnos',t.id), { pagado: true, pagadoConPack: true })
+      })
+      await batch.commit()
+
       await agregarMovimientoCaja({
         tipo: medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
         descripcion: `Pack de ${sesiones} copagos — ${pac.apellido} ${pac.nombre}`,
@@ -655,7 +671,12 @@ export default function FichaPaciente() {
         fecha: hoy(), hora: horaActual()
       })
       await escribirLog(user.uid, `${perfil.apellido} ${perfil.nombre}`, 'Cargó pack de copagos',
-        `${sesiones} sesiones — ${fmtMonto(montoTotal)} — ${pac.apellido} ${pac.nombre}`)
+        `${sesiones} sesiones — ${fmtMonto(montoTotal)} — ${pac.apellido} ${pac.nombre}`
+        + (aSaldar.length > 0 ? ` — saldó ${aSaldar.length} sesión${aSaldar.length>1?'es':''} adeudada${aSaldar.length>1?'s':''}` : ''))
+      if (aSaldar.length > 0) {
+        const idsSaldados = new Set(aSaldar.map(t => t.id))
+        setTurnos(prev => prev.map(t => idsSaldados.has(t.id) ? { ...t, pagado: true, pagadoConPack: true } : t))
+      }
       setPac(prev => ({ ...prev, copagoPlan: nuevoPlan }))
       setModalPack(false)
       return nuevoPlan
