@@ -25,12 +25,13 @@ import Logs from './pages/logs/Logs'
 
 function LimpiezaSilenciosa() {
   const { user, perfil } = useAuth()
-  const { limpiar, reactivarPacientes, migrarOrdenes } = useCache()
+  const { limpiar, reactivarPacientes, migrarOrdenes, dedupeObras } = useCache()
   useEffect(() => {
     if (user && perfil?.estado === 'activo') {
       limpiar()
       reactivarPacientes()
       migrarOrdenes()
+      dedupeObras()
     }
   }, [user?.uid])
   return null

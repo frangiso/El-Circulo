@@ -8,6 +8,21 @@ import { calcVenc, escribirLog, OBRAS_BASE, esParticular, requiereCopago, esPami
 
 const INIT = { modalidad:'obraSocial', requiereCopago:false, nombre:'', apellido:'', dni:'', telefono:'', obraSocial:'', nroAfiliado:'', diagnostico:'', sesionesTotal:'', sesionesUsadas:0, fechaInicio:'', kinesiologoRef:'', observaciones:'', ordenFecha:'', ordenDetalle:'' }
 
+// Agrega la obra social a la lista solo si no existe ya (sin importar mayúsculas/
+// minúsculas ni espacios de más) — antes solo se chequeaba contra la lista base
+// del sistema, así que cada secretaria que tipeaba una obra social ya agregada
+// por otra persona creaba una fila repetida en vez de reusar la que ya existía
+async function agregarObraSocialSiFalta(getObras, invalidarObras, obraSocial) {
+  const nombre = obraSocial.trim()
+  if (!nombre) return
+  const listaActual = await getObras()
+  const yaExiste = listaActual.some(o => o.trim().toLowerCase() === nombre.toLowerCase())
+  if (!yaExiste) {
+    await addDoc(collection(db,'obrasSociales'), { nombre })
+    invalidarObras()
+  }
+}
+
 // Busca duplicados SOLO por DNI — pueden existir pacientes con el mismo nombre
 async function buscarDuplicado(nombre, apellido, dni, idExcluir) {
   const resultados = []
@@ -265,10 +280,7 @@ export function NuevoPaciente() {
   async function guardar(f) {
     setSaving(true)
     try {
-      if (f.obraSocial && !OBRAS_BASE.includes(f.obraSocial)) {
-        await addDoc(collection(db,'obrasSociales'), { nombre: f.obraSocial })
-        invalidarObras()
-      }
+      if (f.obraSocial) await agregarObraSocialSiFalta(getObras, invalidarObras, f.obraSocial)
       const esParticular = f.modalidad === 'particular'
       const pami = !esParticular && esPami(f)
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
@@ -313,7 +325,7 @@ export function EditarPaciente() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, perfil } = useAuth()
-  const { invalidarPacs, invalidarObras } = useCache()
+  const { getObras, invalidarPacs, invalidarObras } = useCache()
   const [inicial, setInicial] = useState(null)
   const [saving, setSaving]   = useState(false)
   const [planAnterior, setPlanAnterior] = useState(null)
@@ -339,9 +351,7 @@ export function EditarPaciente() {
   async function guardar(f) {
     setSaving(true)
     try {
-      if (f.obraSocial && !OBRAS_BASE.includes(f.obraSocial)) {
-        await addDoc(collection(db,'obrasSociales'), { nombre: f.obraSocial }); invalidarObras()
-      }
+      if (f.obraSocial) await agregarObraSocialSiFalta(getObras, invalidarObras, f.obraSocial)
       const esParticular = f.modalidad === 'particular'
       const pami = !esParticular && esPami(f)
       const venc = f.fechaInicio ? calcVenc(f.fechaInicio) : null
