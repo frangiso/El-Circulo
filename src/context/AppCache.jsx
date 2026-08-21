@@ -153,6 +153,52 @@ export function CacheProvider({ children }) {
     set('dedupeObrasOk', true)
   }, [])
 
+  // Migración de una sola vez: aplica retroactivamente el arreglo de "el pack de
+  // copagos salda primero la deuda vieja" a los pacientes que ya tenían crédito de
+  // pack cargado y sesiones sueltas marcadas "Debe" de antes de ese arreglo.
+  const saldarDeudaConPacksExistentes = useCallback(async () => {
+    if (get('saldoDeudaPacksOk')) return
+    try {
+      const configRef = doc(db,'config','saldarDeudaPacks')
+      const configSnap = await getDoc(configRef)
+      if (configSnap.exists() && configSnap.data().hecho === true) {
+        set('saldoDeudaPacksOk', true); return
+      }
+      const [pacsSnap, deudaSnap] = await Promise.all([
+        getDocs(collection(db,'pacientes')),
+        getDocs(query(collection(db,'turnos'), where('pagado','==',false)))
+      ])
+      const deudaPorPaciente = {}
+      deudaSnap.docs.forEach(d => {
+        const t = { id: d.id, ...d.data() }
+        if (t.anulado) return
+        if (!deudaPorPaciente[t.pacienteId]) deudaPorPaciente[t.pacienteId] = []
+        deudaPorPaciente[t.pacienteId].push(t)
+      })
+      const batch = writeBatch(db)
+      let huboMovimientos = false
+      pacsSnap.docs.forEach(d => {
+        const p = { id: d.id, ...d.data() }
+        const plan = p.copagoPlan
+        if (!plan) return
+        const disponibles = (plan.sesionesTotal || 0) - (plan.sesionesUsadas || 0)
+        if (disponibles <= 0) return
+        const deuda = (deudaPorPaciente[p.id] || []).sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''))
+        if (deuda.length === 0) return
+        const aSaldar = deuda.slice(0, disponibles)
+        batch.update(doc(db,'pacientes',p.id), { 'copagoPlan.sesionesUsadas': (plan.sesionesUsadas || 0) + aSaldar.length })
+        aSaldar.forEach(t => batch.update(doc(db,'turnos',t.id), { pagado: true, pagadoConPack: true }))
+        huboMovimientos = true
+      })
+      if (huboMovimientos) {
+        await batch.commit()
+        del('pacs')
+      }
+      await setDoc(configRef, { hecho: true })
+    } catch(e) { console.error('Saldar deuda con packs existentes:',e) }
+    set('saldoDeudaPacksOk', true)
+  }, [])
+
   const invalidarPacs  = () => del('pacs')
   const invalidarUsers = () => del('usuarios','kines')
   const invalidarObras = () => del('obras')
@@ -160,7 +206,7 @@ export function CacheProvider({ children }) {
   return (
     <Ctx.Provider value={{
       getUsuarios, getKines, getObras,
-      getPacientes, limpiar, reactivarPacientes, migrarOrdenes, dedupeObras,
+      getPacientes, limpiar, reactivarPacientes, migrarOrdenes, dedupeObras, saldarDeudaConPacksExistentes,
       invalidarPacs, invalidarUsers, invalidarObras
     }}>
       {children}
