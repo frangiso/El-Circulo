@@ -127,7 +127,7 @@ function sinAcentos(s) {
 }
 
 // Obras sociales que piden token de autorización antes de cada sesión
-export const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos']
+export const OBRAS_TOKEN = ['SanCor','Prevención','Poder Judicial','OSDE','Galeno','Medife','Swiss Medical','Jerárquicos','Federada','Omint']
 
 export function necesitaToken(obraSocial) {
   if (!obraSocial) return false
