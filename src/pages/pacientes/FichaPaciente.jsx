@@ -204,9 +204,12 @@ function ModalMotivo({ titulo, resumen, onConfirmar, onCancelar }) {
   )
 }
 
-function FilaTurno({ turno, kines, onAnular, onCambiarKine, onMarcarPagada }) {
+function FilaTurno({ turno, kines, onAnular, onCambiarKine, onCambiarHora, onMarcarPagada }) {
   const [editandoKine, setEditandoKine] = useState(false)
   const [loadingK, setLoadingK] = useState(false)
+  const [editandoHora, setEditandoHora] = useState(false)
+  const [horaInput, setHoraInput] = useState(turno.hora || '')
+  const [loadingH, setLoadingH] = useState(false)
   const [anulando, setAnulando] = useState(false)
   const [modalAnular, setModalAnular] = useState(false)
   const [modalLiquidar, setModalLiquidar] = useState(false)
@@ -225,6 +228,15 @@ function FilaTurno({ turno, kines, onAnular, onCambiarKine, onMarcarPagada }) {
     await onCambiarKine(turno, kineId)
     setEditandoKine(false)
     setLoadingK(false)
+  }
+
+  async function guardarHora() {
+    const h = horaInput.trim()
+    if (!h || h === turno.hora) { setEditandoHora(false); setHoraInput(turno.hora || ''); return }
+    setLoadingH(true)
+    await onCambiarHora(turno, h)
+    setEditandoHora(false)
+    setLoadingH(false)
   }
 
   function pedirAnular() {
@@ -256,7 +268,22 @@ function FilaTurno({ turno, kines, onAnular, onCambiarKine, onMarcarPagada }) {
   return (
     <tr style={turno.autorizado === false ? { background: 'rgba(220,53,69,0.06)' } : undefined}>
       <td style={turno.autorizado === false ? { color: 'var(--ro)' } : undefined}>{fmtFecha(turno.fecha)}</td>
-      <td>{turno.hora || '—'}</td>
+      <td>
+        {editandoHora ? (
+          <input autoFocus type="text" value={horaInput}
+            onChange={e => setHoraInput(e.target.value)}
+            onBlur={guardarHora}
+            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setHoraInput(turno.hora || ''); setEditandoHora(false) } }}
+            disabled={loadingH} placeholder="HH:MM"
+            style={{ fontSize: 12, padding: '3px 6px', width: 60, border: '1px solid var(--az)', borderRadius: 6 }} />
+        ) : (
+          <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+            <span>{turno.hora || '—'}</span>
+            <button className="btn bs bsm" style={{ fontSize: 10, padding: '2px 6px' }}
+              onClick={() => { setHoraInput(turno.hora || ''); setEditandoHora(true) }} title="Corregir la hora real de la sesión">✎</button>
+          </div>
+        )}
+      </td>
       <td>
         {editandoKine ? (
           <select autoFocus defaultValue={turno.kinesiologoId}
@@ -805,6 +832,17 @@ export default function FichaPaciente() {
     } catch(err) { console.error(err); alert('Error al cambiar kinesiológo') }
   }
 
+  // Reportes usa horaAsistencia (si existe) para decidir mañana/tarde, no "hora" —
+  // se actualizan las dos para que la corrección se refleje ahí también
+  async function cambiarHoraTurno(turno, nuevaHora) {
+    try {
+      const updates = { hora: nuevaHora }
+      if (turno.asistencia === 'asistio') updates.horaAsistencia = nuevaHora
+      await updateDoc(doc(db,'turnos',turno.id), updates)
+      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, ...updates } : t))
+    } catch(err) { console.error(err); alert('Error al cambiar la hora') }
+  }
+
   // Eliminar paciente — borra el doc (los turnos quedan como historial)
   async function eliminarPaciente() {
     if (!window.confirm(`¿Eliminar a ${pac.apellido} ${pac.nombre}? Esta acción no se puede deshacer.`)) return
@@ -1130,6 +1168,7 @@ export default function FichaPaciente() {
                   <FilaTurno key={t.id} turno={t} kines={kines}
                     onAnular={anularTurno}
                     onCambiarKine={cambiarKineTurno}
+                    onCambiarHora={cambiarHoraTurno}
                     onMarcarPagada={marcarComoPagada} />
                 ))}
               </tbody>
