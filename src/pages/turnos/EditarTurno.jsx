@@ -41,7 +41,7 @@ export default function EditarTurno() {
     setLoading(true)
     try {
       const kine = kines.find(k => k.id === f.kineId)
-      await updateDoc(doc(db, 'turnos', id), {
+      const updates = {
         fecha: f.fecha,
         hora: f.hora,
         kinesiologoId: f.kineId,
@@ -49,7 +49,12 @@ export default function EditarTurno() {
         nroSesion: parseInt(f.nroSesion) || turno.nroSesion,
         editadoEn: serverTimestamp(),
         editadoPor: perfil.apellido + ' ' + perfil.nombre
-      })
+      }
+      // Si el turno ya tiene la asistencia marcada, Reportes usa horaAsistencia (no
+      // "hora") para decidir mañana/tarde — sin esto, cambiar la hora acá se guardaba
+      // bien pero el turno seguía apareciendo con la hora vieja en los reportes
+      if (turno.asistencia === 'asistio') updates.horaAsistencia = f.hora
+      await updateDoc(doc(db, 'turnos', id), updates)
       await escribirLog(user.uid, perfil.apellido + ' ' + perfil.nombre,
         'Edición turno',
         turno.pacienteApellido + ' ' + turno.pacienteNombre + ' — nuevo kine: ' + (kine ? kine.apellido + ' ' + kine.nombre : '—'))
