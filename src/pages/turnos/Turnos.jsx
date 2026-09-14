@@ -224,6 +224,11 @@ export default function Turnos() {
   }
 
   async function eliminarTurno(turno) {
+    const asistio = turno.asistencia === 'asistio'
+    if (!window.confirm(asistio
+      ? `¿Eliminar el turno de ${turno.pacienteApellido} ${turno.pacienteNombre}? Ya tiene la asistencia marcada — se borra por completo y no queda registro. Si lo que querés es corregir la hora o el kinesiológo, usá "Editar" en vez de esto.`
+      : `¿Eliminar el turno de ${turno.pacienteApellido} ${turno.pacienteNombre}?`
+    )) return
     try {
       const pac = mapaP[turno.pacienteId]
       if (turno.asistencia === 'asistio' && pac?.plan) {
