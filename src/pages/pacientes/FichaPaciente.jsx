@@ -580,12 +580,54 @@ export default function FichaPaciente() {
     setRegistrando(false)
   }
 
-  // Paciente particular — abre el modal para elegir si pagó o queda debiendo
+  // Paciente particular — si tiene crédito de un pack cargado (pagó varias sesiones
+  // juntas), lo consume solo sin volver a preguntar. Si no, abre el modal para elegir
+  // si pagó esta sesión sola o queda debiendo
   function intentarRegistrarParticular() {
     if (!kineSelId) return alert('Seleccioná un kinesiológo')
     if (!fechaRegistro) return alert('Seleccioná una fecha')
+    if (tieneCreditoCopago(pac)) { registrarSesionParticularConPack(); return }
     setModoRegistro('particular')
     setModalPago(true)
+  }
+
+  // Registra la sesión de un paciente particular consumiendo crédito de un pack ya
+  // pagado — no genera un movimiento nuevo en Caja, ya se cargó entero al pagar el pack
+  async function registrarSesionParticularConPack() {
+    setRegistrando(true)
+    try {
+      const kine = kines.find(k => k.id === kineSelId)
+      const fechaStr = fechaRegistro || hoy()
+      const horaStr = horaActual()
+      const nuevoCopagoUsadas = (pac.copagoPlan?.sesionesUsadas || 0) + 1
+      const turnoData = {
+        fecha: fechaStr, hora: horaStr,
+        pacienteId: id,
+        pacienteNombre: pac.nombre, pacienteApellido: pac.apellido,
+        pacienteDni: pac.dni || '',
+        kinesiologoId: kineSelId,
+        kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null,
+        asistencia: 'asistio', asistenciaTs: serverTimestamp(),
+        pagado: true, pagadoConPack: true,
+        creadoPor: user.uid,
+        creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
+        ts: serverTimestamp()
+      }
+      const nuevoRef = await addDoc(collection(db,'turnos'), turnoData)
+      await updateDoc(doc(db,'pacientes',id), { 'copagoPlan.sesionesUsadas': nuevoCopagoUsadas })
+      const nuevoT = {
+        id: nuevoRef.id, fecha: fechaStr, hora: horaStr,
+        kinesiologoId: kineSelId, kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
+        nroSesion: null, asistencia: 'asistio', pagado: true, pagadoConPack: true
+      }
+      setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
+      setPac(prev => ({ ...prev, copagoPlan: { ...prev.copagoPlan, sesionesUsadas: nuevoCopagoUsadas } }))
+      setFechaRegistro(hoy())
+      setExito(true)
+      setTimeout(() => setExito(false), 3000)
+    } catch(err) { console.error(err); alert('Error al registrar') }
+    setRegistrando(false)
   }
 
   async function registrarSesionParticular(pagoInfo) {
@@ -699,7 +741,7 @@ export default function FichaPaciente() {
 
       await agregarMovimientoCaja({
         tipo: medioPago === 'transferencia' ? 'entrada-transferencia' : 'entrada-efectivo',
-        descripcion: `Pack de ${sesiones} copagos — ${pac.apellido} ${pac.nombre}`,
+        descripcion: `Pack de ${sesiones} ${esParticular ? 'sesiones' : 'copagos'} — ${pac.apellido} ${pac.nombre}`,
         importe: montoTotal,
         kineId: null, profesionalNombre: null,
         cargadoPor: user.uid, cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
@@ -950,6 +992,20 @@ export default function FichaPaciente() {
           <div className="card-title">{(esParticular || pami) ? 'Cuenta corriente' : 'Estado del plan'}</div>
           {esParticular ? (
             <>
+              <div className="row" style={{ justifyContent:'space-between', marginBottom:6 }}>
+                <div style={{ fontSize:12, color:'#888', fontWeight:600 }}>Pack de sesiones prepagas</div>
+                <button className="btn bs bsm" onClick={() => setModalPack(true)}>+ Cargar pack</button>
+              </div>
+              {pac.copagoPlan ? (
+                <div style={{ fontSize:13, marginBottom:10 }}>
+                  <strong>{pac.copagoPlan.sesionesUsadas||0}/{pac.copagoPlan.sesionesTotal}</strong> sesiones usadas
+                  {!tieneCreditoCopago(pac) && <span style={{ color:'var(--na)' }}> — agotado, cargá un pack nuevo</span>}
+                </div>
+              ) : (
+                <div style={{ color:'#888', fontSize:13, marginBottom:10 }}>
+                  Sin pack cargado — se paga sesión por sesión. Si paga varias juntas, cargalas acá para que coincida con Caja.
+                </div>
+              )}
               {sesionesAdeudadas.length === 0 ? (
                 <div style={{ color:'#888', fontSize:13 }}>Sin sesiones adeudadas.</div>
               ) : (
