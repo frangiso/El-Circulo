@@ -82,11 +82,13 @@ function ModalPago({ soloPago, onConfirmar, onCancelar }) {
   const [pago, setPago] = useState('si')
   const [monto, setMonto] = useState('')
   const [medioPago, setMedioPago] = useState('efectivo')
+  const [transferenciaA, setTransferenciaA] = useState('')
 
   function confirmar() {
     if (pago === 'si') {
       if (!monto || parseFloat(monto) <= 0) return alert('Ingresá el monto')
-      onConfirmar({ pagado: true, monto: parseFloat(monto), medioPago })
+      if (medioPago === 'transferencia' && !transferenciaA.trim()) return alert('Ingresá a nombre de quién se transfirió')
+      onConfirmar({ pagado: true, monto: parseFloat(monto), medioPago, transferenciaA: medioPago === 'transferencia' ? transferenciaA.trim() : null })
     } else {
       onConfirmar({ pagado: false })
     }
@@ -115,6 +117,12 @@ function ModalPago({ soloPago, onConfirmar, onCancelar }) {
                 <option value="transferencia">Transferencia</option>
               </select>
             </div>
+            {medioPago === 'transferencia' && (
+              <div className="ff full">
+                <label>¿A nombre de quién se transfirió? *</label>
+                <input value={transferenciaA} onChange={e => setTransferenciaA(e.target.value)} placeholder="Ej: Franco Armand Pilon" />
+              </div>
+            )}
           </div>
         )}
         <div className="re">
@@ -131,13 +139,15 @@ function ModalPack({ onConfirmar, onCancelar }) {
   const [sesiones, setSesiones] = useState('5')
   const [monto, setMonto] = useState('')
   const [medioPago, setMedioPago] = useState('efectivo')
+  const [transferenciaA, setTransferenciaA] = useState('')
   const [saving, setSaving] = useState(false)
 
   async function confirmar() {
     if (!sesiones || parseInt(sesiones) <= 0) return alert('Ingresá la cantidad de sesiones')
     if (!monto || parseFloat(monto) <= 0) return alert('Ingresá el monto total')
+    if (medioPago === 'transferencia' && !transferenciaA.trim()) return alert('Ingresá a nombre de quién se transfirió')
     setSaving(true)
-    await onConfirmar(parseInt(sesiones), parseFloat(monto), medioPago)
+    await onConfirmar(parseInt(sesiones), parseFloat(monto), medioPago, medioPago === 'transferencia' ? transferenciaA.trim() : null)
     setSaving(false)
   }
 
@@ -161,6 +171,12 @@ function ModalPack({ onConfirmar, onCancelar }) {
               <option value="transferencia">Transferencia</option>
             </select>
           </div>
+          {medioPago === 'transferencia' && (
+            <div className="ff full">
+              <label>¿A nombre de quién se transfirió? *</label>
+              <input value={transferenciaA} onChange={e => setTransferenciaA(e.target.value)} placeholder="Ej: Franco Armand Pilon" />
+            </div>
+          )}
         </div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 14 }}>
           Se carga como un solo movimiento en Caja. Si el paciente tiene sesiones sueltas marcadas "Debe", se saldan primero con este crédito (de más viejas a más nuevas) — el resto queda para las próximas sesiones, que se marcan pagadas automáticamente sin volver a preguntar.
@@ -321,7 +337,7 @@ function FilaTurno({ turno, kines, onAnular, onCambiarKine, onCambiarHora, onMar
           <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
             <span className="badge bg">Asistió</span>
             {turno.pagado === true && (
-              <span className="badge bg" title={turno.pagadoConPack ? 'Cubierto por pack de copagos' : turno.medioPago}>
+              <span className="badge bg" title={turno.pagadoConPack ? 'Cubierto por pack de copagos' : (turno.transferenciaA ? `${turno.medioPago} — a ${turno.transferenciaA}` : turno.medioPago)}>
                 {turno.pagadoConPack ? 'Pack' : `Pagó ${turno.monto ? fmtMonto(turno.monto) : ''}`}
               </span>
             )}
@@ -466,6 +482,7 @@ export default function FichaPaciente() {
         turnoData.pagado = pagoInfo.pagado
         turnoData.monto = pagoInfo.pagado ? pagoInfo.monto : null
         turnoData.medioPago = pagoInfo.pagado ? pagoInfo.medioPago : null
+        turnoData.transferenciaA = pagoInfo.pagado ? (pagoInfo.transferenciaA || null) : null
       }
       const batch = writeBatch(db)
       const turnoRef = doc(collection(db,'turnos'))
@@ -482,6 +499,7 @@ export default function FichaPaciente() {
           importe: pagoInfo.monto,
           kineId: kineSelId,
           profesionalNombre: kine.apellido + ' ' + kine.nombre,
+          transferenciaA: pagoInfo.medioPago === 'transferencia' ? (pagoInfo.transferenciaA || null) : null,
           cargadoPor: user.uid,
           cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
           fecha: hoy(), hora: horaStr,
@@ -494,7 +512,7 @@ export default function FichaPaciente() {
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: nuevasUsadas, asistencia: 'asistio',
-        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack,
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, transferenciaA: turnoData.transferenciaA, pagadoConPack: turnoData.pagadoConPack,
           cajaMovMes: (pagoInfo.pagado && !pagoInfo.usoPack) ? mesActual() : undefined } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
@@ -542,6 +560,7 @@ export default function FichaPaciente() {
         turnoData.pagado = pagoInfo.pagado
         turnoData.monto = pagoInfo.pagado ? pagoInfo.monto : null
         turnoData.medioPago = pagoInfo.pagado ? pagoInfo.medioPago : null
+        turnoData.transferenciaA = pagoInfo.pagado ? (pagoInfo.transferenciaA || null) : null
       }
       const nuevoRef = await addDoc(collection(db,'turnos'), turnoData)
       if (nuevoCopagoUsadas !== null) {
@@ -554,6 +573,7 @@ export default function FichaPaciente() {
           importe: pagoInfo.monto,
           kineId: kineSelId,
           profesionalNombre: kine.apellido + ' ' + kine.nombre,
+          transferenciaA: pagoInfo.medioPago === 'transferencia' ? (pagoInfo.transferenciaA || null) : null,
           cargadoPor: user.uid,
           cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
           fecha: hoy(), hora: horaStr,
@@ -566,7 +586,7 @@ export default function FichaPaciente() {
         kinesiologoId: kineSelId,
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: null, autorizado: false, asistencia: 'asistio',
-        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, pagadoConPack: turnoData.pagadoConPack,
+        ...(pagoInfo ? { pagado: turnoData.pagado, monto: turnoData.monto, medioPago: turnoData.medioPago, transferenciaA: turnoData.transferenciaA, pagadoConPack: turnoData.pagadoConPack,
           cajaMovMes: (pagoInfo.pagado && !pagoInfo.usoPack) ? mesActual() : undefined } : {})
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
@@ -649,6 +669,7 @@ export default function FichaPaciente() {
         pagado: pagoInfo.pagado,
         monto: pagoInfo.pagado ? pagoInfo.monto : null,
         medioPago: pagoInfo.pagado ? pagoInfo.medioPago : null,
+        transferenciaA: pagoInfo.pagado ? (pagoInfo.transferenciaA || null) : null,
         creadoPor: user.uid,
         creadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         ts: serverTimestamp()
@@ -660,6 +681,7 @@ export default function FichaPaciente() {
           importe: pagoInfo.monto,
           kineId: kineSelId,
           profesionalNombre: kine.apellido + ' ' + kine.nombre,
+          transferenciaA: pagoInfo.medioPago === 'transferencia' ? (pagoInfo.transferenciaA || null) : null,
           cargadoPor: user.uid,
           cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
           fecha: hoy(),
@@ -674,6 +696,7 @@ export default function FichaPaciente() {
         kinesiologoNombre: kine.apellido + ' ' + kine.nombre,
         nroSesion: null, asistencia: 'asistio',
         pagado: pagoInfo.pagado, monto: pagoInfo.pagado ? pagoInfo.monto : null, medioPago: pagoInfo.pagado ? pagoInfo.medioPago : null,
+        transferenciaA: pagoInfo.pagado ? (pagoInfo.transferenciaA || null) : null,
         cajaMovMes: pagoInfo.pagado ? mesActual() : undefined
       }
       setTurnos(prev => [...prev, nuevoT].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')))
@@ -689,8 +712,9 @@ export default function FichaPaciente() {
     try {
       const kine = kines.find(k => k.id === turno.kinesiologoId)
       const mesMov = mesActual()
+      const transferenciaA = pagoInfo.medioPago === 'transferencia' ? (pagoInfo.transferenciaA || null) : null
       await updateDoc(doc(db,'turnos',turno.id), {
-        pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, cajaMovMes: mesMov
+        pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, transferenciaA, cajaMovMes: mesMov
       })
       const esCopago = turno.nroSesion != null || turno.autorizado === false
       await agregarMovimientoCaja({
@@ -699,13 +723,14 @@ export default function FichaPaciente() {
         importe: pagoInfo.monto,
         kineId: turno.kinesiologoId || null,
         profesionalNombre: kine ? kine.apellido + ' ' + kine.nombre : turno.kinesiologoNombre,
+        transferenciaA,
         cargadoPor: user.uid,
         cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         fecha: hoy(),
         hora: horaActual(),
         turnoId: turno.id
       })
-      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, cajaMovMes: mesMov } : t))
+      setTurnos(prev => prev.map(t => t.id === turno.id ? { ...t, pagado: true, monto: pagoInfo.monto, medioPago: pagoInfo.medioPago, transferenciaA, cajaMovMes: mesMov } : t))
     } catch(err) { console.error(err); alert('Error al registrar el pago') }
   }
 
@@ -717,7 +742,7 @@ export default function FichaPaciente() {
   // de antes de que existiera el modelo de packs y no tiene sentido para PAMI, que no
   // maneja autorización de plan. Para el resto (obra social con copago) no se toca
   // "autorizado": ahí sí es un estado real, separado del pago del copago.
-  async function cargarPackCopago(sesiones, montoTotal, medioPago) {
+  async function cargarPackCopago(sesiones, montoTotal, medioPago, transferenciaA = null) {
     try {
       const pamiPac = esPacientePami(pac)
       const previo = pac.copagoPlan || { sesionesTotal: 0, sesionesUsadas: 0 }
@@ -744,6 +769,7 @@ export default function FichaPaciente() {
         descripcion: `Pack de ${sesiones} ${esParticular ? 'sesiones' : 'copagos'} — ${pac.apellido} ${pac.nombre}`,
         importe: montoTotal,
         kineId: null, profesionalNombre: null,
+        transferenciaA: medioPago === 'transferencia' ? transferenciaA : null,
         cargadoPor: user.uid, cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
         fecha: hoy(), hora: horaActual()
       })
@@ -816,8 +842,8 @@ export default function FichaPaciente() {
 
   // Cuando se carga un pack en el contexto de "registrar sesión sin crédito", además
   // de cargar el pack registra de una la sesión que lo disparó, consumiendo 1 de ahí
-  async function cargarPackYRegistrarPami(sesiones, montoTotal, medioPago) {
-    const nuevoPlan = await cargarPackCopago(sesiones, montoTotal, medioPago)
+  async function cargarPackYRegistrarPami(sesiones, montoTotal, medioPago, transferenciaA = null) {
+    const nuevoPlan = await cargarPackCopago(sesiones, montoTotal, medioPago, transferenciaA)
     if (nuevoPlan) await registrarSesionPami({ pagado: true, usoPack: true }, nuevoPlan)
   }
 

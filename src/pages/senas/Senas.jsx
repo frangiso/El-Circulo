@@ -92,6 +92,7 @@ export default function Senas() {
   const [showDL, setShowDL] = useState(false)
   const [monto, setMonto] = useState('')
   const [medioPago, setMedioPago] = useState('efectivo')
+  const [transferenciaA, setTransferenciaA] = useState('')
   const [saving, setSaving] = useState(false)
   const [devolviendo, setDevolviendo] = useState(null)
   const [anulando, setAnulando] = useState(null)
@@ -113,7 +114,7 @@ export default function Senas() {
   function selec(p) { setPacSel(p); setBusq(p.apellido + ' ' + p.nombre); setShowDL(false) }
 
   function abrirNueva() {
-    setPacSel(null); setBusq(''); setMonto(''); setMedioPago('efectivo')
+    setPacSel(null); setBusq(''); setMonto(''); setMedioPago('efectivo'); setTransferenciaA('')
     setModal(true)
   }
 
@@ -121,11 +122,13 @@ export default function Senas() {
     e.preventDefault()
     if (!pacSel) return alert('Seleccioná un paciente')
     if (!monto || parseFloat(monto) <= 0) return alert('Ingresá el monto')
+    if (medioPago === 'transferencia' && !transferenciaA.trim()) return alert('Ingresá a nombre de quién se transfirió')
     setSaving(true)
     try {
       await addDoc(collection(db, 'senas'), {
         pacienteId: pacSel.id, pacienteNombre: pacSel.nombre, pacienteApellido: pacSel.apellido, pacienteDni: pacSel.dni || '',
         monto: parseFloat(monto), medioPago,
+        transferenciaA: medioPago === 'transferencia' ? transferenciaA.trim() : null,
         fecha: hoy(), hora: horaActual(),
         estado: 'activa',
         cargadoPor: user.uid, cargadoPorNombre: `${perfil.apellido} ${perfil.nombre}`,
@@ -214,7 +217,10 @@ export default function Senas() {
                       <td>{fmtFecha(s.fecha)}</td>
                       <td className="fw6">{s.pacienteApellido} {s.pacienteNombre}</td>
                       <td className="cve fw6">{fmtMonto(s.monto)}</td>
-                      <td>{s.medioPago === 'transferencia' ? <span className="badge bb">Transferencia</span> : <span className="badge bg">Efectivo</span>}</td>
+                      <td>
+                        {s.medioPago === 'transferencia' ? <span className="badge bb">Transferencia</span> : <span className="badge bg">Efectivo</span>}
+                        {s.transferenciaA && <div style={{ fontSize: 11, color: '#888' }}>A: {s.transferenciaA}</div>}
+                      </td>
                       <td className="cgr" style={{ fontSize: 12 }}>{s.cargadoPorNombre}</td>
                       <td>
                         <div className="row" style={{ gap: 4 }}>
@@ -324,6 +330,12 @@ export default function Senas() {
                   <option value="transferencia">Transferencia</option>
                 </select>
               </div>
+              {medioPago === 'transferencia' && (
+                <div className="ff" style={{ marginBottom: 12 }}>
+                  <label>¿A nombre de quién se transfirió? *</label>
+                  <input value={transferenciaA} onChange={e => setTransferenciaA(e.target.value)} placeholder="Ej: Franco Armand Pilon" />
+                </div>
+              )}
               <div className="re" style={{ marginTop: 18 }}>
                 <button type="button" className="btn bs" onClick={() => setModal(false)}>Cancelar</button>
                 <button type="submit" className="btn bp" disabled={saving || !pacSel}>{saving ? 'Guardando...' : 'Guardar'}</button>
