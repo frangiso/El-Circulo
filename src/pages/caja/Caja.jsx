@@ -41,6 +41,36 @@ function ModalMotivo({ titulo, resumen, onConfirmar, onCancelar }) {
   )
 }
 
+// Modal para cargar o corregir a nombre de quién se transfirió un movimiento ya cargado
+function ModalEditarTransferencia({ valorInicial, resumen, onConfirmar, onCancelar }) {
+  const [valor, setValor] = useState(valorInicial || '')
+  const [saving, setSaving] = useState(false)
+
+  async function confirmar() {
+    if (!valor.trim()) return alert('Ingresá a nombre de quién se transfirió')
+    setSaving(true)
+    await onConfirmar(valor.trim())
+    setSaving(false)
+  }
+
+  return (
+    <div className="mo" onClick={e => { if (e.target === e.currentTarget) onCancelar() }}>
+      <div className="mc">
+        <div className="mt" style={{ marginBottom: 6 }}>¿A nombre de quién se transfirió?</div>
+        {resumen && <div style={{ fontSize: 13, color: '#666', marginBottom: 14 }}>{resumen}</div>}
+        <div className="ff" style={{ marginBottom: 14 }}>
+          <label>Nombre *</label>
+          <input value={valor} onChange={e => setValor(e.target.value)} placeholder="Ej: Franco Armand Pilon" autoFocus />
+        </div>
+        <div className="re">
+          <button type="button" className="btn bs" onClick={onCancelar} disabled={saving}>Cancelar</button>
+          <button type="button" className="btn bp" onClick={confirmar} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Caja() {
   const { user, perfil } = useAuth()
   const { getKines } = useCache()
@@ -55,6 +85,7 @@ export default function Caja() {
   const [saving, setSaving]   = useState(false)
   const [filtroDia, setFiltroDia] = useState('')
   const [anulando, setAnulando] = useState(null) // índice del movimiento a anular
+  const [editandoTransferencia, setEditandoTransferencia] = useState(null) // índice del movimiento a editar
 
   useEffect(() => { getKines().then(setKines) }, [])
 
@@ -77,6 +108,9 @@ export default function Caja() {
   const saldoF    = saldoI + entradas - salidas
   const efectivo  = movsVivos.filter(m => m.tipo === 'entrada-efectivo').reduce((a,m) => a + m.importe, 0)
   const transf    = movsVivos.filter(m => m.tipo === 'entrada-transferencia').reduce((a,m) => a + m.importe, 0)
+  // Plata física que debería haber en el cajón — a diferencia de "saldoF" (que mezcla
+  // efectivo y transferencias), esto solo suma/resta lo que entra y sale en billetes
+  const efectivoEnCaja = saldoI + efectivo - salidas
   const movsVis   = !filtroDia ? movs : movs.filter(m => m.fecha === filtroDia)
 
   function saldoFila(idx) {
@@ -124,6 +158,22 @@ export default function Caja() {
       setDocC(prev => ({ ...prev, movimientos: nuevosMovs }))
       setAnulando(null)
     } catch(err) { console.error(err); alert('Error al anular') }
+  }
+
+  // Corrige o carga a nombre de quién se transfirió un movimiento ya cargado
+  // (útil para completar movimientos viejos que quedaron sin ese dato, o corregir un error)
+  async function editarTransferenciaA(idx, nuevoValor) {
+    const m = movs[idx]
+    try {
+      const ref = doc(db, 'caja', 'caja_' + mes)
+      const nuevosMovs = [...movs]
+      nuevosMovs[idx] = { ...nuevosMovs[idx], transferenciaA: nuevoValor }
+      await updateDoc(ref, { movimientos: nuevosMovs })
+      await escribirLog(user.uid, perfil.apellido + ' ' + perfil.nombre, 'Editó destinatario de transferencia',
+        `${fmtMonto(m.importe)} — ${m.descripcion} — ahora a: ${nuevoValor}`)
+      setDocC(prev => ({ ...prev, movimientos: nuevosMovs }))
+      setEditandoTransferencia(null)
+    } catch(err) { console.error(err); alert('Error al guardar') }
   }
 
   const setF = (k, v) => setFM(p => ({ ...p, [k]: v }))
@@ -194,12 +244,16 @@ export default function Caja() {
         <div className="sc"><div className="sp" /></div>
       ) : (
         <div>
-          <div className="mets" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(5,1fr)' }}>
+          <div className="mets" style={{ marginBottom: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
             <div className="met"><div className="met-l">Saldo inicial</div><div className="met-v">{fmtMonto(saldoI)}</div></div>
             <div className="met"><div className="met-l">Entradas efectivo</div><div className="met-v cve">+{fmtMonto(efectivo)}</div></div>
             <div className="met"><div className="met-l">Entradas transf.</div><div className="met-v caz">+{fmtMonto(transf)}</div></div>
             <div className="met"><div className="met-l">Total salidas</div><div className="met-v cro">-{fmtMonto(salidas)}</div></div>
+            <div className="met"><div className="met-l">Efectivo en caja</div><div className="met-v cve">{fmtMonto(efectivoEnCaja)}</div></div>
             <div className="met"><div className="met-l">Debe haber en caja</div><div className="met-v caz">{fmtMonto(saldoF)}</div></div>
+          </div>
+          <div style={{ fontSize: 12, color: '#888', marginTop: -10, marginBottom: 16 }}>
+            "Efectivo en caja" es solo lo que debería haber en billetes (no incluye transferencias). "Debe haber en caja" suma efectivo + transferencias — es el total del negocio, no lo que hay físicamente en el cajón.
           </div>
 
           <div className="tabs">
@@ -259,7 +313,14 @@ export default function Caja() {
                             <td className="fw6">{fmtMonto(saldoFila(idxReal))}</td>
                             <td className="cgr" style={{ fontSize: 11 }}>{m.cargadoPorNombre}</td>
                             <td style={{ textDecoration: 'none' }}>
-                              {!m.anulado && <button className="btn bd bsm" style={{ fontSize: 10 }} onClick={() => pedirAnulacion(idxReal)}>Anular</button>}
+                              <div className="row" style={{ gap: 4 }}>
+                                {!m.anulado && m.tipo === 'entrada-transferencia' && (
+                                  <button className="btn bs bsm" style={{ fontSize: 10 }} onClick={() => setEditandoTransferencia(idxReal)}>
+                                    {m.transferenciaA ? 'Editar' : '+ A quién'}
+                                  </button>
+                                )}
+                                {!m.anulado && <button className="btn bd bsm" style={{ fontSize: 10 }} onClick={() => pedirAnulacion(idxReal)}>Anular</button>}
+                              </div>
                             </td>
                           </tr>
                         )
@@ -345,6 +406,15 @@ export default function Caja() {
             </div>
           )}
         </div>
+      )}
+
+      {editandoTransferencia !== null && (
+        <ModalEditarTransferencia
+          valorInicial={movs[editandoTransferencia].transferenciaA}
+          resumen={`${fmtMonto(movs[editandoTransferencia].importe)} — ${movs[editandoTransferencia].descripcion}`}
+          onConfirmar={(valor) => editarTransferenciaA(editandoTransferencia, valor)}
+          onCancelar={() => setEditandoTransferencia(null)}
+        />
       )}
 
       {anulando !== null && (
