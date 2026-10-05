@@ -51,7 +51,7 @@ export default function Caja() {
   const [carg, setCarg]       = useState(false)
   const [cargado, setCargado] = useState(false)
   const [modal, setModal]     = useState(false)
-  const [fMov, setFM]         = useState({ tipo: 'entrada-efectivo', desc: '', importe: '', kineId: '' })
+  const [fMov, setFM]         = useState({ tipo: 'entrada-efectivo', desc: '', importe: '', kineId: '', transferenciaA: '' })
   const [saving, setSaving]   = useState(false)
   const [filtroDia, setFiltroDia] = useState('')
   const [anulando, setAnulando] = useState(null) // índice del movimiento a anular
@@ -130,6 +130,7 @@ export default function Caja() {
 
   async function guardarMov(e) {
     e.preventDefault()
+    if (fMov.tipo === 'entrada-transferencia' && !fMov.transferenciaA.trim()) return alert('Ingresá a nombre de quién se transfirió')
     setSaving(true)
     try {
       const kine = kines.find(k => k.id === fMov.kineId)
@@ -139,6 +140,7 @@ export default function Caja() {
         importe: parseFloat(fMov.importe),
         kineId: fMov.kineId || null,
         profesionalNombre: kine ? kine.apellido + ' ' + kine.nombre : null,
+        transferenciaA: fMov.tipo === 'entrada-transferencia' ? fMov.transferenciaA.trim() : null,
         cargadoPor: user.uid,
         cargadoPorNombre: perfil.apellido + ' ' + perfil.nombre,
         fecha: new Date().toISOString().split('T')[0],
@@ -158,7 +160,7 @@ export default function Caja() {
         setDocC(p => ({ ...p, movimientos: [...(p.movimientos || []), mov] }))
       }
       await escribirLog(user.uid, perfil.apellido + ' ' + perfil.nombre, 'Movimiento caja', fMov.tipo + ' $' + fMov.importe + ' — ' + fMov.desc)
-      setFM({ tipo: 'entrada-efectivo', desc: '', importe: '', kineId: '' })
+      setFM({ tipo: 'entrada-efectivo', desc: '', importe: '', kineId: '', transferenciaA: '' })
       setModal(false)
     } catch(err) { console.error(err); alert('Error al guardar') }
     setSaving(false)
@@ -249,7 +251,10 @@ export default function Caja() {
                               {m.anulado && <span className="badge br" style={{ marginLeft: 4, textDecoration: 'none' }}>Anulado</span>}
                             </td>
                             <td>{m.profesionalNombre || '—'}</td>
-                            <td>{m.descripcion}</td>
+                            <td>
+                              {m.descripcion}
+                              {m.transferenciaA && <div style={{ fontSize: 11, color: '#888' }}>A: {m.transferenciaA}</div>}
+                            </td>
                             <td className={esEntrada ? 'cve fw6' : 'cro fw6'}>{esEntrada ? '+' : '-'}{fmtMonto(m.importe)}</td>
                             <td className="fw6">{fmtMonto(saldoFila(idxReal))}</td>
                             <td className="cgr" style={{ fontSize: 11 }}>{m.cargadoPorNombre}</td>
@@ -324,7 +329,10 @@ export default function Caja() {
                           {m.tipo === 'entrada-transferencia' && <span className="badge bb">Transferencia</span>}
                           {m.tipo === 'salida' && <span className="badge br">Salida</span>}
                         </td>
-                        <td>{m.descripcion}</td>
+                        <td>
+                          {m.descripcion}
+                          {m.transferenciaA && <div style={{ fontSize: 11, color: '#888' }}>A: {m.transferenciaA}</div>}
+                        </td>
                         <td className="fw6">{fmtMonto(m.importe)}</td>
                         <td className="cgr" style={{ fontSize: 12 }}>{m.cargadoPorNombre}</td>
                         <td style={{ fontSize: 12 }}>{m.anuladoPorNombre}<div className="cgr" style={{ fontSize: 11 }}>{fmtFecha(m.anuladoFecha)} {m.anuladoHora}</div></td>
@@ -377,6 +385,12 @@ export default function Caja() {
                     <option value="">Sin profesional</option>
                     {kines.map(k => <option key={k.id} value={k.id}>{k.apellido} {k.nombre}</option>)}
                   </select>
+                </div>
+              )}
+              {fMov.tipo === 'entrada-transferencia' && (
+                <div className="ff" style={{ marginBottom: 12 }}>
+                  <label>¿A nombre de quién se transfirió? *</label>
+                  <input value={fMov.transferenciaA} onChange={e => setF('transferenciaA', e.target.value)} placeholder="Ej: Franco Armand Pilon" />
                 </div>
               )}
               <div className="re" style={{ marginTop: 18 }}>

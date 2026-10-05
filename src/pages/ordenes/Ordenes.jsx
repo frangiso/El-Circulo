@@ -128,6 +128,7 @@ function ModalNuevaOrden({ getPacientes, user, perfil, onGuardada, onCancelar })
   const [detalle, setDetalle] = useState('')
   const [monto, setMonto] = useState('')
   const [medioPago, setMedioPago] = useState('efectivo')
+  const [transferenciaA, setTransferenciaA] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { getPacientes().then(setPacs) }, [])
@@ -150,6 +151,7 @@ function ModalNuevaOrden({ getPacientes, user, perfil, onGuardada, onCancelar })
     if (!n || n <= 0) return alert('Ingresá la cantidad de sesiones')
     if (!fechaEntrega) return alert('Ingresá la fecha de entrega')
     if (pami && (!monto || parseFloat(monto) <= 0)) return alert('Ingresá el monto del pack')
+    if (pami && medioPago === 'transferencia' && !transferenciaA.trim()) return alert('Ingresá a nombre de quién se transfirió')
     setSaving(true)
     try {
       const nombreCompleto = `${perfil.apellido} ${perfil.nombre}`
@@ -174,6 +176,7 @@ function ModalNuevaOrden({ getPacientes, user, perfil, onGuardada, onCancelar })
           descripcion: `Pack de ${n} copagos — ${pacSel.apellido} ${pacSel.nombre}`,
           importe: parseFloat(monto),
           kineId: null, profesionalNombre: null,
+          transferenciaA: medioPago === 'transferencia' ? transferenciaA.trim() : null,
           cargadoPor: user.uid, cargadoPorNombre: nombreCompleto,
           fecha: hoy(), hora: horaActual()
         })
@@ -273,6 +276,12 @@ function ModalNuevaOrden({ getPacientes, user, perfil, onGuardada, onCancelar })
                     <option value="transferencia">Transferencia</option>
                   </select>
                 </div>
+                {medioPago === 'transferencia' && (
+                  <div className="ff full">
+                    <label>¿A nombre de quién se transfirió? *</label>
+                    <input value={transferenciaA} onChange={e => setTransferenciaA(e.target.value)} placeholder="Ej: Franco Armand Pilon" />
+                  </div>
+                )}
               </>
             )}
             <div className="ff full">
