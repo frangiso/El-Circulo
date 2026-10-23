@@ -33,6 +33,20 @@ function horaEfectiva(t) {
   return t.horaAsistencia || t.hora
 }
 
+// Convierte una hora (24hs, o 12hs con a.m./p.m. de registros viejos) a minutos
+// desde las 00:00, para poder compararla contra un rango horario. null si no se puede parsear.
+function horaAMinutos(hora) {
+  if (!hora) return null
+  const s = hora.trim().toLowerCase()
+  const m = s.match(/(\d{1,2}):(\d{2})/)
+  if (!m) return null
+  let h = parseInt(m[1], 10), min = parseInt(m[2], 10)
+  if (isNaN(h) || isNaN(min)) return null
+  if (/p\.?\s?m\.?/.test(s) && h !== 12) h += 12
+  if (/a\.?\s?m\.?/.test(s) && h === 12) h = 0
+  return h * 60 + min
+}
+
 export default function Reportes() {
   const { getKines, getPacientes } = useCache()
   const [vista, setVista]   = useState('mes') // 'mes' | 'dia'
@@ -45,6 +59,8 @@ export default function Reportes() {
   const [cargado, setCargado] = useState(false)
   const [busqK, setBK]      = useState('')
   const [expandido, setExpandido] = useState(null)
+  const [horaDesde, setHoraDesde] = useState('')
+  const [horaHasta, setHoraHasta] = useState('')
 
   // Carga kines desde colección 'kinesiologos' (carga manual) via AppCache
   useEffect(() => {
@@ -83,7 +99,17 @@ export default function Reportes() {
   // y los cargados desde panel de turnos con asistencia marcada. Se excluyen las
   // sesiones anuladas: siguen con asistencia:'asistio' (no se borran, quedan de
   // auditoría) pero no deben sumar en las estadísticas del kinesiológo
-  const turnosConAsistencia = turnos.filter(t => t.asistencia === 'asistio' && !t.anulado)
+  // Si hay un rango horario cargado, filtra por la hora real de asistencia
+  function enRangoHorario(hora) {
+    if (!horaDesde && !horaHasta) return true
+    const mins = horaAMinutos(hora)
+    if (mins === null) return false
+    const desdeM = horaDesde ? horaAMinutos(horaDesde) : 0
+    const hastaM = horaHasta ? horaAMinutos(horaHasta) : 24 * 60
+    return mins >= desdeM && mins <= hastaM
+  }
+
+  const turnosConAsistencia = turnos.filter(t => t.asistencia === 'asistio' && !t.anulado && enRangoHorario(horaEfectiva(t)))
 
   // Agrupar por kinesiologoId — funciona con kines de colección 'kinesiologos'
   // Y también con kines de 'usuarios' (los viejos) por si quedaron registros
@@ -142,7 +168,9 @@ export default function Reportes() {
   const tituloPeriodo = vista === 'dia' ? fmtFecha(fechaDia) : labelMes(mes)
 
   // Detalle de turnos del día, ordenados por la hora real de asistencia (o la agendada si no asistió)
-  const detalleDia = [...turnos].sort((a,b) => (horaEfectiva(a)||'').localeCompare(horaEfectiva(b)||''))
+  const detalleDia = [...turnos]
+    .filter(t => enRangoHorario(horaEfectiva(t)))
+    .sort((a,b) => (horaEfectiva(a)||'').localeCompare(horaEfectiva(b)||''))
 
   return (
     <div>
@@ -208,6 +236,17 @@ export default function Reportes() {
                 <ILupa />
                 <input className="si" placeholder="Filtrar kinesiológo..."
                   value={busqK} onChange={e => setBK(e.target.value)} />
+              </div>
+              <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#888' }}>Rango horario:</span>
+                <input type="time" value={horaDesde} onChange={e => setHoraDesde(e.target.value)}
+                  style={{ padding: '7px 9px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
+                <span style={{ fontSize: 12, color: '#888' }}>a</span>
+                <input type="time" value={horaHasta} onChange={e => setHoraHasta(e.target.value)}
+                  style={{ padding: '7px 9px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
+                {(horaDesde || horaHasta) && (
+                  <button className="btn bs bsm" onClick={() => { setHoraDesde(''); setHoraHasta('') }}>Limpiar</button>
+                )}
               </div>
             </div>
             <div className="tw">
