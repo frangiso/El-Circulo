@@ -167,10 +167,11 @@ export default function Reportes() {
 
   const tituloPeriodo = vista === 'dia' ? fmtFecha(fechaDia) : labelMes(mes)
 
-  // Detalle de turnos del día, ordenados por la hora real de asistencia (o la agendada si no asistió)
+  // Detalle de turnos, ordenados por fecha y luego por la hora real de asistencia
+  // (o la agendada si no asistió) — en vista día la fecha es siempre la misma
   const detalleDia = [...turnos]
     .filter(t => enRangoHorario(horaEfectiva(t)))
-    .sort((a,b) => (horaEfectiva(a)||'').localeCompare(horaEfectiva(b)||''))
+    .sort((a,b) => (a.fecha||'').localeCompare(b.fecha||'') || (horaEfectiva(a)||'').localeCompare(horaEfectiva(b)||''))
 
   return (
     <div>
@@ -318,21 +319,28 @@ export default function Reportes() {
             </div>
           </div>
 
-          {/* Detalle de turnos del día */}
-          {vista === 'dia' && (
+          {/* Detalle de turnos — siempre en vista día; en vista mes solo si hay un
+              rango horario cargado (si no, sería listar el mes entero sin filtrar) */}
+          {(vista === 'dia' || horaDesde || horaHasta) && (
             <div className="card">
-              <div className="card-title">Detalle del día — {tituloPeriodo} ({detalleDia.length})</div>
+              <div className="card-title">
+                {vista === 'dia' ? 'Detalle del día' : 'Detalle de turnos en el rango horario'} — {tituloPeriodo} ({detalleDia.length})
+              </div>
               {detalleDia.length === 0 ? (
-                <div className="emt">Sin turnos este día</div>
+                <div className="emt">{vista === 'dia' ? 'Sin turnos este día' : 'Sin turnos en ese rango horario'}</div>
               ) : (
                 <div className="tw">
                   <table>
                     <thead>
-                      <tr><th>Hora</th><th>Turno</th><th>Paciente</th><th>Kinesiológo</th><th>Obra social</th><th>Estado</th></tr>
+                      <tr>
+                        {vista === 'mes' && <th>Fecha</th>}
+                        <th>Hora</th><th>Turno</th><th>Paciente</th><th>Kinesiológo</th><th>Obra social</th><th>Estado</th>
+                      </tr>
                     </thead>
                     <tbody>
                       {detalleDia.map(t => (
                         <tr key={t.id}>
+                          {vista === 'mes' && <td className="cgr" style={{ fontSize: 12 }}>{fmtFecha(t.fecha)}</td>}
                           <td>
                             {horaEfectiva(t) || '—'}
                             {t.horaAsistencia && t.hora && t.horaAsistencia !== t.hora && (
